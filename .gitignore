@@ -1,0 +1,3 @@
+*.elc
+md-live-autoloads.el
+.playwright-mcp/
