@@ -1,0 +1,27 @@
+#+TITLE: md-live Org sample
+
+* Org Preview Fixture
+
+This sample file is used for md-live browser QA.
+
+- It contains a Mermaid source block.
+- It contains inline math: $a^2 + b^2 = c^2$.
+- It links to the Markdown fixture: [[file:sample.md][Markdown sample]].
+
+* Mermaid
+
+#+begin_src mermaid
+graph TD;
+  A[Org source] --> B[md-live export]
+  B --> C[Mermaid SVG]
+#+end_src
+
+* Copy Target
+
+#+begin_src emacs-lisp
+(message "copy me from Org")
+#+end_src
+
+* Return Link
+
+Open [[file:sample.md#markdown-preview-fixture][sample.md]] to verify Org to Markdown navigation.

@@ -1,0 +1,49 @@
+;;; md-live-test-helpers.el --- Test helpers for md-live -*- lexical-binding: t; -*-
+
+(require 'cl-lib)
+(require 'json)
+
+(defun md-live-test--with-temp-markdown-file (contents fn)
+  "Create temporary markdown file with CONTENTS and call FN with path."
+  (let ((file (make-temp-file "md-live-" nil ".md")))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert contents))
+          (funcall fn file))
+      (when (file-exists-p file)
+        (delete-file file)))))
+
+(defun md-live-test--with-temp-org-file (contents fn)
+  "Create temporary Org file with CONTENTS and call FN with path."
+  (let ((file (make-temp-file "md-live-" nil ".org")))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert contents))
+          (funcall fn file))
+      (when (file-exists-p file)
+        (delete-file file)))))
+
+(defun md-live-test--with-temp-linked-files (files fn)
+  "Create FILES in a temporary directory and call FN with that directory.
+FILES is an alist of relative file names to contents."
+  (let ((dir (make-temp-file "md-live-links-" t)))
+    (unwind-protect
+        (progn
+          (dolist (file files)
+            (let ((path (expand-file-name (car file) dir)))
+              (make-directory (file-name-directory path) t)
+              (with-temp-file path
+                (insert (cdr file)))))
+          (funcall fn dir))
+      (when (file-directory-p dir)
+        (delete-directory dir t)))))
+
+(defun md-live-test--json-plist (json)
+  "Parse JSON string to plist."
+  (json-parse-string json :object-type 'plist))
+
+(provide 'md-live-test-helpers)
+
+;;; md-live-test-helpers.el ends here
