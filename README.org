@@ -1,0 +1,129 @@
+#+TITLE: md-live
+
+[[https://github.com/takeokunn/md-live/actions/workflows/ci.yml][https://github.com/takeokunn/md-live/actions/workflows/ci.yml/badge.svg]]
+
+* Overview
+
+md-live は、AI 生成 Markdown / Org を Emacs から高速に読むためのライブプレビュー用 Elisp パッケージです。
+WebSocket 前提を避け、SSE で更新を配信し、xwidget に依存せず外部ブラウザで安定表示します。
+
+* Features
+
+- SSE によるライブ更新
+- xwidget 非依存（外部ブラウザ表示）
+- Markdown と Org のプレビュー表示
+- Mermaid / KaTeX / Highlight.js
+- Markdown / Org のローカル相対リンク遷移 + 戻る/進む
+- TOC サイドバー
+- コードコピー
+- 検索 + ピン留めハイライト
+- テーマ切替（Dark / Light）
+- ズーム
+
+* Installation
+
+** use-package
+
+#+begin_src emacs-lisp
+(use-package md-live
+  :load-path "/path/to/md-live"
+  :commands (md-live-preview-buffer md-live-preview-file md-live-stop-server))
+#+end_src
+
+** Manual
+
+#+begin_src emacs-lisp
+(add-to-list 'load-path "/path/to/md-live")
+(require 'md-live)
+#+end_src
+
+* Usage
+
+** 現在の Markdown / Org バッファをプレビュー
+
+Markdown または Org バッファで次を実行します。
+
+#+begin_src emacs-lisp
+M-x md-live-preview-buffer
+#+end_src
+
+** ファイル指定でプレビュー
+
+=.md= / =.org= ファイルを指定してプレビューできます。
+
+#+begin_src emacs-lisp
+M-x md-live-preview-file
+#+end_src
+
+** ローカルリンク遷移
+
+プレビュー内の =.md= / =.org= への相対リンクをクリックすると、同じ md-live 画面内でリンク先を開きます。
+fragment や query はファイル解決時には無視され、remote URL や未対応拡張子は開きません。
+
+#+begin_src org
+[[file:example/sample.md][Markdown sample]]
+[[file:example/sample.org][Org sample]]
+#+end_src
+
+** サーバー停止
+
+#+begin_src emacs-lisp
+M-x md-live-stop-server
+#+end_src
+
+* Customization
+
+- =md-live-host= : bind host
+- =md-live-port= : bind port
+- =md-live-open-browser-function= : URL オープン関数
+
+* Development
+
+基本ゲートは Makefile から実行します。
+
+#+begin_src sh
+make compile
+make test
+make lint
+make package-lint
+make autoloads
+#+end_src
+
+Nix を使う場合は、同じ品質ゲートを flake 経由で確認できます。
+
+#+begin_src sh
+nix flake check
+#+end_src
+
+ブラウザ smoke では =example/sample.md= と =example/sample.org= を使います。
+agent 実行では Playwright で DOM assertion と screenshot / console log を保存し、人間の目視だけを成功条件にしません。
+
+#+begin_src sh
+emacs -Q -L . -l md-live.el \
+  --eval '(setq md-live-open-browser-function (lambda (url) (princ (concat url "\n"))))' \
+  --eval '(md-live-preview-file (expand-file-name "example/sample.md" default-directory))' \
+  --eval '(while t (accept-process-output nil 1))'
+#+end_src
+
+* Troubleshooting
+
+- Mermaid / KaTeX / Highlight.js はブラウザ側で CDN から読み込みます。描画されない場合はブラウザ console と network log を確認してください。
+- port conflict がある場合は =md-live-port= を別の値に変更してください。
+- Org preview は Emacs built-in の =org= / =ox-html= で HTML fragment に export します。preview 中に Babel source block は実行しません。
+- remote URL、=.el=、=.html=、=.pdf= などはローカルリンク遷移の対象外です。
+
+* Scope
+
+MVP 内:
+
+- Markdown / Org のプレビュー表示
+- =.md= / =.org= のローカル相対リンク遷移
+- Mermaid、KaTeX、コードコピー、検索 / ピン留めハイライト
+
+MVP 外:
+
+- xwidget 依存
+- WebSocket 化
+- remote file fetch
+- Org Babel 実行
+- Org-roam、agenda、PDF export、Org publishing
