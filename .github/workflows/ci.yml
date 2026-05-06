@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        emacs_version:
+          - 28.1
+          - 29.1
+          - snapshot
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Emacs
+        uses: purcell/setup-emacs@v8.5
+        with:
+          version: ${{ matrix.emacs_version }}
+
+      - name: Install package-lint
+        run: |
+          emacs -Q --batch \
+            --eval "(require 'package)" \
+            --eval "(setq package-archives '((\"gnu\" . \"https://elpa.gnu.org/packages/\") (\"melpa\" . \"https://melpa.org/packages/\")))" \
+            --eval "(package-initialize)" \
+            --eval "(unless package-archive-contents (package-refresh-contents))" \
+            --eval "(unless (package-installed-p 'package-lint) (package-install 'package-lint))"
+
+      - name: Compile
+        run: make compile
+
+      - name: Test
+        run: make test
+
+      - name: Lint
+        run: make lint
+
+      - name: Package lint
+        run: make package-lint
+
+      - name: Autoloads
+        run: make autoloads
