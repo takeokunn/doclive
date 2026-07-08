@@ -797,8 +797,10 @@ runtime script and style when it is safe for CSP nonce use."
   (when (and path (string-match "\\?" path))
     (let ((pairs (split-string (substring path (1+ (match-beginning 0))) "&" t))
           found
+          seen
+          duplicate
           invalid)
-      (dolist (p pairs (and (not invalid) found))
+      (dolist (p pairs (and (not invalid) (not duplicate) found))
         (if (not (string-match "=" p))
             (unless (doclive--decode-query-component p)
               (setq invalid t))
@@ -809,8 +811,11 @@ runtime script and style when it is safe for CSP nonce use."
                  (decoded-value (doclive--decode-query-component raw-value)))
             (if (or (null decoded-key) (null decoded-value))
                 (setq invalid t)
-              (when (and (null found) (string= decoded-key key))
-                (setq found decoded-value)))))))))
+              (when (string= decoded-key key)
+                (if seen
+                    (setq duplicate t)
+                  (setq seen t
+                        found decoded-value))))))))))
 
 (defun doclive--sse-handshake ()
   "Return SSE headers."
