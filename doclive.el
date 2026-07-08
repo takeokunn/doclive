@@ -635,11 +635,21 @@ Return nil when VALUE is not valid percent-encoded data."
                          (buffer_id . ,new-id)
                          (name . ,(plist-get new-entry :name)))))))))
 
+(defconst doclive--http-header-name-regexp
+  "\\`[!#$%&'*+.^_`|~0-9A-Za-z-]+\\'"
+  "Regexp matching supported HTTP header field names.")
+
 (defun doclive--http-response (status content-type body &optional script-nonce extra-headers)
   "Build HTTP response from STATUS CONTENT-TYPE BODY.
 SCRIPT-NONCE is included in the CSP when it is safe for nonce use.
 EXTRA-HEADERS is a list of raw header lines ending in CRLF."
-  (let ((encoded-body (encode-coding-string body 'utf-8-unix t)))
+  (let* ((safe-extra-headers
+          (delq nil
+                (mapcar (lambda (line)
+                          (and (doclive--safe-extra-header-line-p line)
+                               line))
+                        extra-headers)))
+         (encoded-body (encode-coding-string body 'utf-8-unix t)))
     (concat
      (format "HTTP/1.1 %s\r\n" status)
      "Connection: close\r\n"
@@ -647,9 +657,16 @@ EXTRA-HEADERS is a list of raw header lines ending in CRLF."
      (format "Content-Length: %d\r\n" (string-bytes encoded-body))
      "Cache-Control: no-store\r\n"
      (doclive--browser-security-header-lines script-nonce)
-     (mapconcat #'identity extra-headers "")
+     (mapconcat #'identity safe-extra-headers "")
      "\r\n"
      encoded-body)))
+
+(defun doclive--safe-extra-header-line-p (line)
+  "Return non-nil when LINE is safe as one generated HTTP header line."
+  (and (stringp line)
+       (string-match "\\`\\([^:\r\n]+\\):[ \t]*\\([^\r\n]*\\)\r\n\\'" line)
+       (string-match-p doclive--http-header-name-regexp (match-string 1 line))
+       (not (string-match-p "[[:cntrl:]]" (match-string 2 line)))))
 
 (defun doclive--browser-security-header-lines (&optional script-nonce)
   "Return HTTP header lines for browser-side response hardening.
@@ -852,10 +869,15 @@ runtime script and style when it is safe for CSP nonce use."
           (let* ((eq (match-beginning 0))
                  (raw-key (substring p 0 eq))
                  (raw-value (substring p (1+ eq)))
-                 (decoded-key (doclive--decode-query-component raw-key))
-                 (decoded-value (doclive--decode-query-component raw-value)))
+                 (decoded-key (and (not (doclive--unsafe-raw-query-component-p raw-key))
+                                   (doclive--decode-query-component raw-key)))
+                 (decoded-value (and (not (doclive--unsafe-raw-query-component-p raw-value))
+                                     (doclive--decode-query-component raw-value))))
             (if (or (null decoded-key) (null decoded-value))
                 (setq invalid t)
+              (when (or (doclive--unsafe-query-component-p decoded-key)
+                        (doclive--unsafe-query-component-p decoded-value))
+                (setq invalid t))
               (when (string= (downcase decoded-key) wanted)
                 (if seen
                     (setq duplicate t)
@@ -872,7 +894,8 @@ runtime script and style when it is safe for CSP nonce use."
           (when (string-match "=" p)
             (let* ((eq (match-beginning 0))
                    (raw-key (substring p 0 eq))
-                   (decoded-key (doclive--decode-query-component raw-key)))
+                   (decoded-key (and (not (doclive--unsafe-raw-query-component-p raw-key))
+                                     (doclive--decode-query-component raw-key))))
               (when (and decoded-key
                          (string= (downcase decoded-key) wanted))
                 (throw 'found t)))))
@@ -893,11 +916,16 @@ runtime script and style when it is safe for CSP nonce use."
             (let* ((eq (match-beginning 0))
                    (raw-key (substring p 0 eq))
                    (raw-value (substring p (1+ eq)))
-                   (decoded-key (doclive--decode-query-component raw-key))
+                   (decoded-key (and (not (doclive--unsafe-raw-query-component-p raw-key))
+                                     (doclive--decode-query-component raw-key)))
+                   (decoded-value (and (not (doclive--unsafe-raw-query-component-p raw-value))
+                                       (doclive--decode-query-component raw-value)))
                    (normalized-key (and decoded-key (downcase decoded-key))))
               (cond
                ((or (null decoded-key)
-                    (null (doclive--decode-query-component raw-value)))
+                    (null decoded-value)
+                    (doclive--unsafe-query-component-p decoded-key)
+                    (doclive--unsafe-query-component-p decoded-value))
                 (setq invalid t))
                ((gethash normalized-key seen-keys)
                 (setq duplicate t))
@@ -906,9 +934,15 @@ runtime script and style when it is safe for CSP nonce use."
                (t
                 (puthash normalized-key t seen-keys)))))))))
 
-(defconst doclive--http-header-name-regexp
-  "\\`[!#$%&'*+.^_`|~0-9A-Za-z-]+\\'"
-  "Regexp matching supported HTTP header field names.")
+(defun doclive--unsafe-query-component-p (component)
+  "Return non-nil when decoded query COMPONENT is unsafe for routing."
+  (and (stringp component)
+       (string-match-p "[[:cntrl:]]" component)))
+
+(defun doclive--unsafe-raw-query-component-p (component)
+  "Return non-nil when raw query COMPONENT encodes control characters."
+  (and (stringp component)
+       (string-match-p "%\\(?:0[0-9A-Fa-f]\\|1[0-9A-Fa-f]\\|7[Ff]\\)" component)))
 
 (defun doclive--request-http-version (request-line)
   "Return the HTTP version from REQUEST-LINE, or nil."

@@ -884,6 +884,12 @@
   (should-not (doclive--query-param "/content?token=secret&x=%ZZ" "token"))
   (should-not (doclive--query-param "/content?token=%ZZ&token=secret" "token")))
 
+(ert-deftest doclive-test-query-param-rejects-decoded-control-characters ()
+  "Query parameter parser should fail closed on decoded control characters."
+  (should-not (doclive--query-param "/content?id=%0d%0aX:%20y" "id"))
+  (should-not (doclive--query-param "/content?%0d=id" "id"))
+  (should-not (doclive--query-param "/open?id=a&path=target%00.md" "path")))
+
 (ert-deftest doclive-test-valid-query-rejects-ambiguous-or-token-keys ()
   "Route-level query validation should reject ambiguous or token-bearing URLs."
   (should (doclive--valid-query-p "/content?id=abc&path=target.md"))
@@ -899,7 +905,9 @@
   (should-not (doclive--valid-query-p "/preview?token"))
   (should-not (doclive--valid-query-p "/preview?Token=secret"))
   (should-not (doclive--valid-query-p "/preview?%74oken=secret"))
-  (should-not (doclive--valid-query-p "/preview?id=abc&bootstrap=one&BOOTSTRAP=two")))
+  (should-not (doclive--valid-query-p "/preview?id=abc&bootstrap=one&BOOTSTRAP=two"))
+  (should-not (doclive--valid-query-p "/preview?id=%0d%0aX:%20y"))
+  (should-not (doclive--valid-query-p "/content?%0d=value")))
 
 (ert-deftest doclive-test-random-token-uses-openssl-rand ()
   "Token generation should prefer OS-backed random bytes when available."
@@ -1065,6 +1073,21 @@
     (should (equal (decode-coding-string (substring response (+ body-start 4))
                                          'utf-8-unix t)
                    body))))
+
+(ert-deftest doclive-test-http-response-drops-unsafe-extra-headers ()
+  "Extra response headers should be emitted only as safe single header lines."
+  (let ((response
+         (doclive--http-response
+          "200 OK" "text/plain" "body" nil
+          '("X-Good: ok\r\n"
+            "Bad Header: ignored\r\n"
+            "X-Injected: safe\r\nX-Evil: no\r\n"
+            "X-Binary: no\000pe\r\n"))))
+    (should (string-match-p "X-Good: ok\r\n" response))
+    (should-not (string-match-p "Bad Header: ignored\r\n" response))
+    (should-not (string-match-p "X-Injected: safe\r\n" response))
+    (should-not (string-match-p "X-Evil: no\r\n" response))
+    (should-not (string-match-p "X-Binary:" response))))
 
 (ert-deftest doclive-test-http-response-csp-includes-custom-asset-origins ()
   "CSP should allow configured asset origins and same-origin mirrors."
