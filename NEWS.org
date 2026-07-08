@@ -33,6 +33,8 @@
     actions, media posters, and unparsed srcset lists are covered.
   - Linked-document resolution rejects protocol-relative URLs consistently with
     browser-side navigation.
+  - Browser-side linked-document navigation rejects backslash-containing paths
+    before they reach the local preview server.
   - HTTP query parameters with malformed percent-encoding are rejected instead
     of being interpreted as raw route data.
   - HTTP response bodies are emitted as UTF-8 bytes before computing Content-Length.

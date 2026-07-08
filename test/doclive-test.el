@@ -602,6 +602,10 @@
              html))
     (should (string-match-p
              (regexp-quote
+              "href.indexOf(String.fromCharCode(92))!==-1")
+             html))
+    (should (string-match-p
+             (regexp-quote
               "if(/^[a-z][a-z0-9+.-]*:/.test(folded)&&!/^(https?:|mailto:)/.test(folded)) return '';")
              html))))
 
