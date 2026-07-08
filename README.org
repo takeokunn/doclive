@@ -172,6 +172,21 @@ emacs -Q -L . -l doclive.el \
 - Org preview は Emacs built-in の =org= / =ox-html= で HTML fragment に export します。preview 中に Babel source block は実行しません。
 - remote URL、=.el=、=.html=、=.pdf= などはローカルリンク遷移の対象外です。
 
+* Contributing
+
+コントリビューション手順、ローカル検証、レビュー観点は =CONTRIBUTING.org= を参照してください。
+ユーザーに見える変更は =NEWS.org= も更新してください。
+
+* Security
+
+脆弱性の詳細を public issue に書かないでください。
+報告手順と現在のセキュリティ境界は =SECURITY.md= にまとめています。
+
+* License
+
+doclive は GPL-3.0-or-later で配布されています。
+詳細は =LICENSE= を参照してください。
+
 * Scope
 
 MVP 内:

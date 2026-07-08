@@ -1,0 +1,67 @@
+#+TITLE: Contributing to doclive
+
+doclive welcomes small, reviewable changes that improve the preview
+experience, package quality, tests, or documentation.
+
+* Before opening a change
+
+- Search existing issues and pull requests to avoid duplicated work.
+- For security-sensitive reports, do not open a public issue.  Follow
+  =SECURITY.md= instead.
+- Keep compatibility with Emacs 28.1 unless the minimum version is
+  intentionally changed in =doclive.el= and documented in the pull request.
+
+* Development setup
+
+The canonical local gate is:
+
+#+begin_src sh
+make check
+#+end_src
+
+With Nix:
+
+#+begin_src sh
+nix develop
+make check
+#+end_src
+
+The flake checks can also be run directly:
+
+#+begin_src sh
+nix flake check
+#+end_src
+
+* Pull request checklist
+
+- Add or update ERT tests for behavior changes.
+- Run =make check= and include the result in the pull request.
+- Keep CDN/browser assets pinned to exact immutable versions.
+- Do not add floating URLs such as =@latest= or unversioned CDN paths.
+- Do not broaden local file access without a security rationale and tests.
+- Update =README.org= and =NEWS.org= for user-visible changes.
+
+* Coding style
+
+- Use lexical binding.
+- Prefer small pure helpers for parser, routing, sanitizer, and security logic.
+- Treat byte-compiler warnings as failures.
+- Keep checkdoc and package-lint clean.
+- Avoid adding runtime dependencies unless the package metadata and MELPA impact
+  are explicitly justified.
+
+* Security-sensitive areas
+
+Changes touching any of the following need tests and a short threat-model note in
+the pull request:
+
+- request routing and token validation
+- Content-Security-Policy and browser asset URL handling
+- Markdown/Org HTML sanitization
+- local file and linked-document resolution
+- timers, process sentinels, and server cleanup
+
+* Release notes
+
+User-visible changes should be added to =NEWS.org= under the current unreleased
+section.  Keep entries concise and written from the user's perspective.
