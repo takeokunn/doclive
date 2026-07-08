@@ -1146,8 +1146,16 @@
              "/content?id=abc" '(("cookie" . "doclive-token=secret-token_1.2~3"))))
     (should (doclive--authorized-request-p
              "/content?id=abc" '(("cookie" . "other=x; doclive-token=secret-token_1.2~3"))))
+    (should (doclive--authorized-request-p
+             "/content?id=abc&view=full" '(("cookie" . "doclive-token=secret-token_1.2~3"))))
     (should-not (doclive--authorized-request-p
                  "/content?id=abc&token=secret-token_1.2~3"
+                 '(("cookie" . "doclive-token=secret-token_1.2~3"))))
+    (should-not (doclive--authorized-request-p
+                 "/content?id=abc&bootstrap=bootstrap-code"
+                 '(("cookie" . "doclive-token=secret-token_1.2~3"))))
+    (should-not (doclive--authorized-request-p
+                 "/preview?id=abc&BOOTSTRAP=bootstrap-code"
                  '(("cookie" . "doclive-token=secret-token_1.2~3"))))
     (should-not (doclive--authorized-request-p "/content?id=abc"))
     (should-not (doclive--authorized-request-p "/content?id=abc&token=wrong"))

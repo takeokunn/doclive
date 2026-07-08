@@ -861,6 +861,22 @@ runtime script and style when it is safe for CSP nonce use."
                   (setq seen t
                         found decoded-value))))))))))
 
+(defun doclive--query-key-present-p (path key)
+  "Return non-nil when PATH contains query KEY after URL decoding."
+  (when (and path (string-match "\\?" path))
+    (let ((pairs (split-string (substring path (1+ (match-beginning 0))) "&"))
+          (wanted (downcase key)))
+      (catch 'found
+        (dolist (p pairs)
+          (when (string-match "=" p)
+            (let* ((eq (match-beginning 0))
+                   (raw-key (substring p 0 eq))
+                   (decoded-key (doclive--decode-query-component raw-key)))
+              (when (and decoded-key
+                         (string= (downcase decoded-key) wanted))
+                (throw 'found t)))))
+        nil))))
+
 (defun doclive--valid-query-p (path)
   "Return non-nil when PATH has safe, unambiguous query syntax."
   (or (not (and path (string-match "\\?" path)))
@@ -943,6 +959,7 @@ runtime script and style when it is safe for CSP nonce use."
 (defun doclive--authorized-request-p (path &optional headers)
   "Return non-nil if PATH is valid and HEADERS has the current token cookie."
   (and (doclive--valid-query-p path)
+       (not (doclive--query-key-present-p path "bootstrap"))
        (stringp doclive--server-token)
        (let ((cookie-token (doclive--cookie-token headers)))
          (and (stringp cookie-token)
