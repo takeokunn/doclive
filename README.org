@@ -180,7 +180,8 @@ nix flake check
 #+end_src
 
 プレビュー smoke では =example/sample.md= と =example/sample.org= を使います。
-agent 実行では Playwright で DOM assertion と screenshot / console log を保存し、人間の目視だけを成功条件にしません。
+自動ゲートは =make check= / =pre-commit run --all-files= / =nix flake check= で確認し、
+ブラウザ表示の smoke は下記コマンドでサーバ起動経路を検証します。
 
 #+begin_src sh
 emacs -Q --batch -L . -l doclive.el \
