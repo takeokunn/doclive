@@ -676,12 +676,13 @@
   (let ((html (doclive--preview-html)))
     (should (string-match-p (regexp-quote "folded.startsWith('//')") html))
     (should (string-match-p
-             (regexp-quote "raw.indexOf(String.fromCharCode(92))!==-1")
+             (regexp-quote "trimmed.indexOf(String.fromCharCode(92))!==-1")
              html))
+    (should (string-match-p (regexp-quote "const trimmed=raw.trim();") html))
     (should (string-match-p
-             (regexp-quote "if(/[\\u0000-\\u001F\\u007F]/.test(raw)) return '';")
+             (regexp-quote "if(/[\\u0000-\\u001F\\u007F\\s]/.test(trimmed)) return '';")
              html))
-    (should (string-match-p (regexp-quote "return raw.trim();") html))
+    (should (string-match-p (regexp-quote "return trimmed;") html))
     (should (string-match-p
              (regexp-quote "/^(href|src|xlink:href|formaction|action|poster)$/i")
              html))

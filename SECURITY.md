@@ -64,11 +64,12 @@ directory is therefore rejected unless `doclive-allow-linked-document-parent-dir
 is explicitly enabled for trusted documents.
 
 Rendered document URL attributes are kept only for relative links, anchors, and
-explicit `http:`, `https:`, or `mailto:` URLs.  Unsupported schemes,
-protocol-relative URLs, backslashes, and control/space-folded forms are removed
-before DOM insertion.  `srcset` is removed before DOM insertion because it is a
-compound URL list.  `ping` is removed before DOM insertion to avoid link-click
-side effects from rendered content.
+explicit `http:` or `https:` URLs.  `mailto:` is allowed only for `href` and
+`xlink:href`.  Unsupported schemes, protocol-relative URLs, backslashes, and
+control or whitespace-bearing forms are removed before DOM insertion.  `srcset`
+is removed before DOM insertion because it is a compound URL list.  `ping` is
+removed before DOM insertion to avoid link-click side effects from rendered
+content.
 
 ## Disclosure
 

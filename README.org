@@ -138,7 +138,7 @@ preview URL は信頼できる相手以外へ渡さないでください。
 ブラウザ資源は既定で pinned CDN URL を使います。
 =doclive-preview-asset-urls= は自前ミラーやローカル配信先に差し替えられますが、指定できるのは =https:= / =http:= の絶対URL、または同一オリジンの相対URLだけです。
 =file:= / =ftp:= / =javascript:= / =vbscript:= / =data:= / =//= から始まる protocol-relative URL、バックスラッシュを含むURLは拒否され、Content-Security-Policy は設定された資源URLの origin から生成されます。
-また、文書本文から生成された =href= / =src= / =xlink:href= / =formaction= / =action= / =poster= は、相対リンク・アンカー・=http:= / =https:= / =mailto:= だけを保持し、その他の scheme、protocol-relative URL、バックスラッシュ、制御文字を含むURLは DOM 挿入前に削除します。
+また、文書本文から生成された =href= / =src= / =xlink:href= / =formaction= / =action= / =poster= は、相対リンク・アンカー・=http:= / =https:= だけを保持し、=mailto:= は =href= / =xlink:href= のみで許可します。その他の scheme、protocol-relative URL、バックスラッシュ、制御文字・空白を含むURLは DOM 挿入前に削除します。
 =srcset= は複合URLリストとして解釈が必要なため、DOM 挿入前に削除します。
 
 ローカルリンク遷移は既定でクリック元ファイルのディレクトリ配下に限定されます。
