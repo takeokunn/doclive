@@ -314,10 +314,12 @@
            (progn
              (should-not (doclive--resolve-linked-document entry "target.el"))
              (should-not (doclive--resolve-linked-document entry "orphan.html"))
-             (should-not (doclive--resolve-linked-document entry "https://example.com/target.md"))
-             (should-not (doclive--resolve-linked-document entry "file:target.md"))
-             (should-not (doclive--resolve-linked-document entry "/tmp/target.md"))
-             (should (doclive--resolve-linked-document entry "target.org?x=y#heading")))
+            (should-not (doclive--resolve-linked-document entry "https://example.com/target.md"))
+            (should-not (doclive--resolve-linked-document entry "file:target.md"))
+            (should-not (doclive--resolve-linked-document entry "/tmp/target.md"))
+            (should-not (doclive--resolve-linked-document entry "subdir\\target.md"))
+            (should-not (doclive--resolve-linked-document entry "target.md\n"))
+            (should (doclive--resolve-linked-document entry "target.org?x=y#heading")))
          (when (buffer-live-p buf)
            (kill-buffer buf)))))))
 

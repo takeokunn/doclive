@@ -487,6 +487,8 @@ they resolve under the current document's directory."
   "Return non-nil when REL is a local relative document link."
   (and (stringp rel)
        (not (string-empty-p rel))
+       (not (string-match-p "\\\\" rel))
+       (not (string-match-p "[[:cntrl:]]" rel))
        (not (file-name-absolute-p rel))
        (not (string-match-p "\\`[[:alpha:]][[:alnum:]+.-]*:" rel))))
 
