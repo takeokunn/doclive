@@ -1344,16 +1344,27 @@
                  '(("cookie" . "doclive-token=secret-token_1.2~3; doclive-token=secret-token_1.2~3"))))))
 
 (ert-deftest doclive-test-parse-request-headers-rejects-invalid-field-names ()
-  "Header parsing should ignore malformed field names."
+  "Header parsing should reject malformed field names."
   (should
    (equal (doclive--parse-request-headers
            "GET / HTTP/1.1\r\nCookie: doclive-token=secret\r\nX-Test: ok\r\n\r\n")
           '(("cookie" . "doclive-token=secret")
             ("x-test" . "ok"))))
-  (should
-   (equal (doclive--parse-request-headers
-           "GET / HTTP/1.1\r\nBad Name: nope\r\nBad\tName: nope\r\nCookie: doclive-token=secret\r\n\r\n")
-          '(("cookie" . "doclive-token=secret")))))
+  (should (eq (doclive--parse-request-headers
+               "GET / HTTP/1.1\r\nBad Name: nope\r\nCookie: doclive-token=secret\r\n\r\n")
+              :invalid))
+  (should (eq (doclive--parse-request-headers
+               "GET / HTTP/1.1\r\nBad\tName: nope\r\nCookie: doclive-token=secret\r\n\r\n")
+              :invalid)))
+
+(ert-deftest doclive-test-parse-request-headers-rejects-folded-lines ()
+  "Header parsing should fail closed on obsolete folded headers."
+  (should (eq (doclive--parse-request-headers
+               "GET / HTTP/1.1\r\nCookie: doclive-token=secret\r\n continuation\r\n\r\n")
+              :invalid))
+  (should (eq (doclive--parse-request-headers
+               "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\tcontinued\r\n\r\n")
+              :invalid)))
 
 (ert-deftest doclive-test-valid-host-header ()
   "HTTP/1.1 Host handling should reject ambiguous or unexpected hosts."
@@ -1413,7 +1424,9 @@
              '(("host" . "docs.example.invalid:39123"))))
     (should-not (doclive--valid-host-header-p
                  "GET / HTTP/1.1"
-                 '(("host" . "docs.example.invalid:bad"))))))
+                 '(("host" . "docs.example.invalid:bad")))))
+  (should-not (doclive--valid-host-header-p "GET / HTTP/1.0" :invalid))
+  (should-not (doclive--authorized-request-p "/content?id=abc" :invalid)))
 
 (ert-deftest doclive-test-authorized-request-uses-secure-token-compare ()
   "Route authorization should use the hardened token comparison helper."
@@ -2000,6 +2013,36 @@
           (doclive-host "127.0.0.1")
           (doclive-port 39123)
           (proc (make-process :name "doclive-test-invalid-host"
+                              :buffer nil
+                              :command '("cat")
+                              :noquery t)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'doclive--route-request)
+                     (lambda (_proc _path &optional _headers)
+                       (setq routed t)))
+                    ((symbol-function 'process-send-string)
+                     (lambda (_proc string)
+                       (push string sent)))
+                    ((symbol-function 'delete-process)
+                     (lambda (_proc)
+                       (setq deleted t))))
+            (doclive--connection-filter proc request)
+            (should deleted)
+            (should-not routed)
+            (should (string-match-p "400 Bad Request" (mapconcat #'identity sent ""))))
+        (when (process-live-p proc)
+          (delete-process proc))))))
+
+(ert-deftest doclive-test-connection-filter-rejects-malformed-headers ()
+  "Connection filter should reject malformed headers instead of routing."
+  (dolist (request '("GET /content?id=abc HTTP/1.1\r\nHost: 127.0.0.1:39123\r\nBad Name: x\r\n\r\n"
+                     "GET /content?id=abc HTTP/1.1\r\nHost: 127.0.0.1:39123\r\n continuation\r\n\r\n"))
+    (let ((sent nil)
+          (deleted nil)
+          (routed nil)
+          (doclive-host "127.0.0.1")
+          (doclive-port 39123)
+          (proc (make-process :name "doclive-test-malformed-header"
                               :buffer nil
                               :command '("cat")
                               :noquery t)))
