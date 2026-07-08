@@ -503,11 +503,14 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
       target)))
 
 (defun doclive--decode-query-component (value)
-  "Decode query component VALUE."
-  (condition-case _
-      (url-unhex-string
-       (replace-regexp-in-string "\\+" " " (or value "") t t))
-    (error (or value ""))))
+  "Decode query component VALUE.
+Return nil when VALUE is not valid percent-encoded data."
+  (let ((raw (or value "")))
+    (unless (string-match-p "%\\(?:\\'\\|[^[:xdigit:]]\\|[[:xdigit:]]\\'\\|[[:xdigit:]][^[:xdigit:]]\\)" raw)
+      (condition-case _
+          (url-unhex-string
+           (replace-regexp-in-string "\\+" " " raw t t))
+        (error nil)))))
 
 (defun doclive--local-document-link-p (rel)
   "Return non-nil when REL is a local relative document link."
@@ -780,14 +783,26 @@ inline runtime script when it is safe for CSP nonce use."
   "Extract KEY from query in PATH."
   (when (and path (string-match "\\?" path))
     (let ((pairs (split-string (substring path (1+ (match-beginning 0))) "&" t))
-          found)
-      (dolist (p pairs found)
-        (when (and (not found) (string-match "=" p))
-          (let* ((eq (match-beginning 0))
-                 (raw-key (substring p 0 eq))
-                 (raw-value (substring p (1+ eq))))
-            (when (string= (doclive--decode-query-component raw-key) key)
-              (setq found (doclive--decode-query-component raw-value)))))))))
+          found
+          done
+          invalid)
+      (dolist (p pairs (and (not invalid) found))
+        (if (not (string-match "=" p))
+            (unless (doclive--decode-query-component p)
+              (setq invalid t
+                    done t))
+          (when (not done)
+            (let* ((eq (match-beginning 0))
+                   (raw-key (substring p 0 eq))
+                   (raw-value (substring p (1+ eq)))
+                   (decoded-key (doclive--decode-query-component raw-key))
+                   (decoded-value (doclive--decode-query-component raw-value)))
+              (if (or (null decoded-key) (null decoded-value))
+                  (setq invalid t
+                        done t)
+                (when (string= decoded-key key)
+                  (setq found decoded-value
+                        done t))))))))))
 
 (defun doclive--sse-handshake ()
   "Return SSE headers."

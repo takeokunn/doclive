@@ -33,6 +33,8 @@
     actions, media posters, and unparsed srcset lists are covered.
   - Linked-document resolution rejects protocol-relative URLs consistently with
     browser-side navigation.
+  - HTTP query parameters with malformed percent-encoding are rejected instead
+    of being interpreted as raw route data.
   - HTTP response bodies are emitted as UTF-8 bytes before computing Content-Length.
   - SSE broadcast drops failed clients while continuing delivery to healthy clients.
   - Empty SSE client sets are removed instead of leaving stale tracking entries.

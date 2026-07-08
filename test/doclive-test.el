@@ -782,6 +782,13 @@
                  "target.md?x=y#heading"))
   (should-not (doclive--query-param "/content?id=abc" "x")))
 
+(ert-deftest doclive-test-query-param-rejects-malformed-percent-encoding ()
+  "Query parameter parser should fail closed on malformed percent encoding."
+  (should-not (doclive--query-param "/content?id=%ZZ" "id"))
+  (should-not (doclive--query-param "/content?%ZZ=value&id=abc" "id"))
+  (should-not (doclive--query-param "/content?%ZZ&id=abc" "id"))
+  (should-not (doclive--query-param "/content?token=%ZZ&token=secret" "token")))
+
 (ert-deftest doclive-test-random-token-uses-openssl-rand ()
   "Token generation should prefer OS-backed random bytes when available."
   (let ((called nil))
@@ -989,7 +996,9 @@
   (let ((doclive--server-token "secret token"))
     (should (doclive--authorized-request-p "/content?id=abc&token=secret+token"))
     (should-not (doclive--authorized-request-p "/content?id=abc"))
-    (should-not (doclive--authorized-request-p "/content?id=abc&token=wrong"))))
+    (should-not (doclive--authorized-request-p "/content?id=abc&token=wrong"))
+    (should-not (doclive--authorized-request-p "/content?id=abc&token=%ZZ"))
+    (should-not (doclive--authorized-request-p "/content?id=abc&token=%ZZ&token=secret+token"))))
 
 (ert-deftest doclive-test-authorized-request-uses-secure-token-compare ()
   "Route authorization should use the hardened token comparison helper."
