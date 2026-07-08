@@ -90,6 +90,13 @@
   :type 'string
   :group 'doclive)
 
+(defcustom doclive-allow-non-loopback-host nil
+  "Whether doclive may bind the preview server to non-loopback hosts.
+Keep this nil unless you understand that preview URLs authorize access
+to local document contents with a bearer token."
+  :type 'boolean
+  :group 'doclive)
+
 (defcustom doclive-port 39123
   "Port for doclive local server."
   :type 'integer
@@ -368,6 +375,21 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
        (not (string-empty-p host))
        (not (string-match-p "[[:cntrl:][:space:]/?#:]" host))))
 
+(defun doclive--loopback-host-p (host)
+  "Return non-nil when HOST names a loopback interface."
+  (and (stringp host)
+       (let ((host (downcase host)))
+         (or (member host '("localhost" "::1" "[::1]"))
+             (and (string-match
+                   "\\`127\\.\\([0-9]+\\)\\.\\([0-9]+\\)\\.\\([0-9]+\\)\\'"
+                   host)
+                  (cl-every (lambda (octet)
+                              (let ((value (string-to-number octet)))
+                                (<= 0 value 255)))
+                            (list (match-string 1 host)
+                                  (match-string 2 host)
+                                  (match-string 3 host))))))))
+
 (defun doclive--valid-port-p (port)
   "Return non-nil when PORT is a valid TCP port."
   (and (integerp port)
@@ -385,6 +407,9 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
   "Signal a user error if server customizations are invalid."
   (unless (doclive--valid-host-p doclive-host)
     (user-error "Doclive-host must be a hostname or IPv4 literal without URL syntax"))
+  (unless (or doclive-allow-non-loopback-host
+              (doclive--loopback-host-p doclive-host))
+    (user-error "Doclive-host must be loopback unless doclive-allow-non-loopback-host is non-nil"))
   (unless (doclive--valid-port-p doclive-port)
     (user-error "Doclive-port must be an integer between 1 and 65535")))
 
@@ -594,9 +619,10 @@ Return nil when VALUE is not valid percent-encoded data."
                          (buffer_id . ,new-id)
                          (name . ,(plist-get new-entry :name)))))))))
 
-(defun doclive--http-response (status content-type body &optional script-nonce)
+(defun doclive--http-response (status content-type body &optional script-nonce extra-headers)
   "Build HTTP response from STATUS CONTENT-TYPE BODY.
-SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
+SCRIPT-NONCE is included in the CSP when it is safe for nonce use.
+EXTRA-HEADERS is a list of raw header lines ending in CRLF."
   (let ((encoded-body (encode-coding-string body 'utf-8-unix t)))
     (concat
      (format "HTTP/1.1 %s\r\n" status)
@@ -605,6 +631,7 @@ SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
      (format "Content-Length: %d\r\n" (string-bytes encoded-body))
      "Cache-Control: no-store\r\n"
      (doclive--browser-security-header-lines script-nonce)
+     (mapconcat #'identity extra-headers "")
      "\r\n"
      encoded-body)))
 
@@ -693,7 +720,7 @@ runtime script and style when it is safe for CSP nonce use."
    (let ((nonce (doclive--browser-script-nonce script-nonce)))
      (if nonce (concat " nonce='" (doclive--escape-html-attribute nonce) "'") ""))
    ">"
-   "const qs=new URLSearchParams(location.search); let currentId=qs.get('id'); const currentToken=qs.get('token')||'';"
+   "const qs=new URLSearchParams(location.search); let currentId=qs.get('id');"
    "function scrubTokenFromLocation(){if(!qs.has('token')) return; const clean=new URLSearchParams(qs); clean.delete('token'); const q=clean.toString(); history.replaceState({id:currentId},'',q?'?'+q:location.pathname);}"
    "const statusEl=document.getElementById('status'); const mdEl=document.getElementById('md'); const tocEl=document.getElementById('toc');"
    "const searchEl=document.getElementById('search'); const pinEl=document.getElementById('pin'); const chipsEl=document.getElementById('chips');"
@@ -760,15 +787,14 @@ runtime script and style when it is safe for CSP nonce use."
    "function normalizeTheme(theme){return theme==='light'?'light':'dark';}"
    "function applyTheme(theme){theme=normalizeTheme(theme); document.body.setAttribute('data-theme',theme); localStorage.setItem('doclive-theme',theme); themeEl.value=theme;}"
    "function applyZoom(){mdEl.style.fontSize=(zoom*100)+'%';}"
-   "function authedPath(path){const sep=path.includes('?')?'&':'?'; return path+sep+'token='+encodeURIComponent(currentToken);}"
    "function pushNav(id,name){if(navIndex>=0&&navStack[navIndex]&&navStack[navIndex].id===id) return; navStack=navStack.slice(0,navIndex+1); navStack.push({id:id,name:name||''}); navIndex=navStack.length-1; updateNavButtons();}"
    "function updateNavButtons(){document.getElementById('back').disabled=navIndex<=0; document.getElementById('forward').disabled=navIndex<0||navIndex>=navStack.length-1;}"
    "let es=null;"
-   "async function fetchContent(){const r=await fetch(authedPath('/content?id='+encodeURIComponent(currentId)),{cache:'no-store'}); return r.json();}"
+   "async function fetchContent(){const r=await fetch('/content?id='+encodeURIComponent(currentId),{cache:'no-store'}); return r.json();}"
    "async function applyContent(j){if(!j.ok){statusEl.textContent=j.error||'not found'; dotEl.className='dot dot-disconnected'; return;} statusEl.textContent='live • rev '+j.revision+' • '+(j.name||''); dotEl.className='dot'; if(j.revision===lastRev) return; lastRev=j.revision; const kind=j.contentKind||'markdown'; let html=''; if(kind==='org-html'){html=j.html||'';}else{const parsed=parseFrontmatter(j.markdown||''); html=renderFrontmatter(parsed.front)+marked.parse(parsed.body||'');} html=sanitizeHtml(html); mdEl.setAttribute('data-content-kind',kind); mdEl.innerHTML=html; wireCopy(); renderMath(); await renderMermaid(); buildToc(); mdEl.setAttribute('data-base-html',mdEl.innerHTML); applyHighlights(); applyZoom(); pushNav(currentId,j.name||''); history.replaceState({id:currentId},'',`?id=${encodeURIComponent(currentId)}`);}"
-   "async function openLinkedDocument(href){try{const r=await fetch(authedPath('/open?id='+encodeURIComponent(currentId)+'&path='+encodeURIComponent(href)),{cache:'no-store'}); const j=await r.json(); if(!j.ok){statusEl.textContent=j.error||'open failed'; return;} currentId=j.buffer_id; lastRev=-1; connectSSE(); const c=await fetchContent(); await applyContent(c);}catch(e){statusEl.textContent='open failed';}}"
+   "async function openLinkedDocument(href){try{const r=await fetch('/open?id='+encodeURIComponent(currentId)+'&path='+encodeURIComponent(href),{cache:'no-store'}); const j=await r.json(); if(!j.ok){statusEl.textContent=j.error||'open failed'; return;} currentId=j.buffer_id; lastRev=-1; connectSSE(); const c=await fetchContent(); await applyContent(c);}catch(e){statusEl.textContent='open failed';}}"
    "function wireDocumentLinkNavigation(){mdEl.querySelectorAll('a[href]').forEach(a=>{const href=a.getAttribute('href')||''; if(/^[a-zA-Z][a-zA-Z0-9+.-]*:/i.test(href)||href.startsWith('#')||href.startsWith('//')||href.indexOf(String.fromCharCode(92))!==-1) return; if(!/\\.(md|org|html)($|#|\\?)/i.test(href)) return; a.addEventListener('click',ev=>{ev.preventDefault(); openLinkedDocument(href);});});}"
-   "function connectSSE(){if(!currentId){statusEl.textContent='missing id'; dotEl.className='dot dot-disconnected'; return;} if(es){es.close(); es=null;} es=new EventSource(authedPath('/events?id='+encodeURIComponent(currentId))); es.addEventListener('open',()=>{statusEl.textContent='connected'; dotEl.className='dot';}); es.addEventListener('revision',async()=>{try{const j=await fetchContent(); await applyContent(j);}catch(e){statusEl.textContent='sync error';}}); es.onerror=()=>{statusEl.textContent='reconnecting…'; dotEl.className='dot dot-disconnected';};}"
+   "function connectSSE(){if(!currentId){statusEl.textContent='missing id'; dotEl.className='dot dot-disconnected'; return;} if(es){es.close(); es=null;} es=new EventSource('/events?id='+encodeURIComponent(currentId)); es.addEventListener('open',()=>{statusEl.textContent='connected'; dotEl.className='dot';}); es.addEventListener('revision',async()=>{try{const j=await fetchContent(); await applyContent(j);}catch(e){statusEl.textContent='sync error';}}); es.onerror=()=>{statusEl.textContent='reconnecting…'; dotEl.className='dot dot-disconnected';};}"
    "searchEl.addEventListener('input',()=>applyHighlights());"
    "pinEl.addEventListener('click',()=>{const q=(searchEl.value||'').trim(); if(!q) return; if(!pinned.includes(q)) pinned.push(q); renderChips(); applyHighlights();});"
    "themeEl.addEventListener('change',()=>applyTheme(themeEl.value));"
@@ -817,6 +843,66 @@ runtime script and style when it is safe for CSP nonce use."
                   (setq seen t
                         found decoded-value))))))))))
 
+(defun doclive--valid-query-p (path)
+  "Return non-nil when PATH has safe query syntax and no duplicate token."
+  (or (not (and path (string-match "\\?" path)))
+      (let ((pairs (split-string (substring path (1+ (match-beginning 0))) "&" t))
+            invalid
+            seen-token
+            duplicate-token)
+        (dolist (p pairs (and (not invalid) (not duplicate-token)))
+          (if (not (string-match "=" p))
+              (unless (doclive--decode-query-component p)
+                (setq invalid t))
+            (let* ((eq (match-beginning 0))
+                   (raw-key (substring p 0 eq))
+                   (raw-value (substring p (1+ eq)))
+                   (decoded-key (doclive--decode-query-component raw-key)))
+              (cond
+               ((or (null decoded-key)
+                    (null (doclive--decode-query-component raw-value)))
+                (setq invalid t))
+               ((string= decoded-key "token")
+                (if seen-token
+                    (setq duplicate-token t)
+                  (setq seen-token t))))))))))
+
+(defun doclive--parse-request-headers (request)
+  "Parse HTTP REQUEST headers into a case-folded alist."
+  (let (headers)
+    (dolist (line (cdr (split-string request "\r\n" t)) (nreverse headers))
+      (when (string-match "\\`\\([^:]+\\):[ \t]*\\(.*\\)\\'" line)
+        (push (cons (downcase (match-string 1 line))
+                    (match-string 2 line))
+              headers)))))
+
+(defun doclive--request-header-values (headers name)
+  "Return all values for HTTP header NAME in HEADERS."
+  (let ((name (downcase name))
+        values)
+    (dolist (header headers (nreverse values))
+      (when (string= (car header) name)
+        (push (cdr header) values)))))
+
+(defun doclive--cookie-token (headers)
+  "Return the doclive session token from HEADERS, or nil on ambiguity."
+  (let (found duplicate)
+    (dolist (header (doclive--request-header-values headers "cookie")
+                    (and (not duplicate) found))
+      (dolist (cookie (split-string header ";" t))
+        (let ((cookie (string-trim cookie)))
+          (when (string-match "\\`doclive-token=\\([^;]*\\)\\'" cookie)
+            (if found
+                (setq duplicate t)
+              (setq found (match-string 1 cookie)))))))))
+
+(defun doclive--session-cookie-header ()
+  "Return a Set-Cookie header for the current server token."
+  (when (and (stringp doclive--server-token)
+             (string-match-p "\\`[A-Za-z0-9._~-]+\\'" doclive--server-token))
+    (format "Set-Cookie: doclive-token=%s; Path=/; SameSite=Strict; HttpOnly\r\n"
+            doclive--server-token)))
+
 (defun doclive--sse-handshake ()
   "Return SSE headers."
   (concat
@@ -827,39 +913,45 @@ runtime script and style when it is safe for CSP nonce use."
    "Connection: keep-alive\r\n\r\n"
    "retry: 1200\n\n"))
 
-(defun doclive--authorized-request-p (path)
-  "Return non-nil if PATH has the current server token."
-  (let ((token (doclive--query-param path "token")))
-    (and (stringp doclive--server-token)
-         (stringp token)
-         (doclive--secure-string-equal-p token doclive--server-token))))
+(defun doclive--authorized-request-p (path &optional headers)
+  "Return non-nil if PATH or HEADERS has the current server token."
+  (and (doclive--valid-query-p path)
+       (stringp doclive--server-token)
+       (let ((query-token (doclive--query-param path "token"))
+             (cookie-token (doclive--cookie-token headers)))
+         (or (and (stringp query-token)
+                  (doclive--secure-string-equal-p query-token doclive--server-token))
+             (and (stringp cookie-token)
+                  (doclive--secure-string-equal-p cookie-token doclive--server-token))))))
 
 (defun doclive--send-forbidden (proc)
   "Send a forbidden response on PROC and close it."
   (process-send-string proc (doclive--http-response "403 Forbidden" "text/plain" "Forbidden"))
   (delete-process proc))
 
-(defun doclive--route-request (proc path)
-  "Route request on PROC for PATH."
+(defun doclive--route-request (proc path &optional headers)
+  "Route request on PROC for PATH and optional HEADERS."
   (cond
    ((or (doclive--route-matches-p path "/") (doclive--route-matches-p path "/preview"))
-    (if (doclive--authorized-request-p path)
-        (let ((script-nonce (doclive--random-token)))
+    (if (doclive--authorized-request-p path headers)
+        (let ((script-nonce (doclive--random-token))
+              (cookie-header (doclive--session-cookie-header)))
           (process-send-string
            proc
            (doclive--http-response "200 OK" "text/html"
                                     (doclive--preview-html script-nonce)
-                                    script-nonce))
+                                    script-nonce
+                                    (and cookie-header (list cookie-header))))
           (delete-process proc))
       (doclive--send-forbidden proc)))
    ((doclive--route-matches-p path "/content")
-    (if (doclive--authorized-request-p path)
+    (if (doclive--authorized-request-p path headers)
         (let ((id (doclive--query-param path "id")))
           (process-send-string proc (doclive--http-response "200 OK" "application/json" (doclive--json-for-id id)))
           (delete-process proc))
       (doclive--send-forbidden proc)))
    ((doclive--route-matches-p path "/open")
-    (if (doclive--authorized-request-p path)
+    (if (doclive--authorized-request-p path headers)
         (let ((id (doclive--query-param path "id"))
               (rel (doclive--query-param path "path")))
           (process-send-string
@@ -869,7 +961,7 @@ runtime script and style when it is safe for CSP nonce use."
           (delete-process proc))
       (doclive--send-forbidden proc)))
    ((doclive--route-matches-p path "/events")
-    (if (doclive--authorized-request-p path)
+    (if (doclive--authorized-request-p path headers)
         (let* ((id (doclive--query-param path "id"))
                (entry (and id (doclive--get-entry id))))
           (if (not entry)
@@ -927,12 +1019,13 @@ runtime script and style when it is safe for CSP nonce use."
           (process-put proc 'doclive-request-buffer buffer)
         (process-put proc 'doclive-request-buffer nil)
         (let* ((line (car (split-string buffer "\r\n" t)))
-               (path (doclive--parse-request-path line)))
+               (path (doclive--parse-request-path line))
+               (headers (doclive--parse-request-headers buffer)))
           (if (not (doclive--valid-request-line-p line))
               (progn
                 (process-send-string proc (doclive--http-response "400 Bad Request" "text/plain" "Bad Request"))
                 (delete-process proc))
-            (doclive--route-request proc path)))))))
+            (doclive--route-request proc path headers)))))))
 
 (defun doclive-server-running-p ()
   "Return non-nil when doclive server is running."

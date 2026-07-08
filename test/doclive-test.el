@@ -715,19 +715,19 @@
     (should (string-match-p (regexp-quote "href.startsWith('//')") html))
     (should (string-match-p (regexp-quote "\\.(md|org|html)($|#|\\?)") html))))
 
-(ert-deftest doclive-test-preview-html-uses-token-for-server-calls ()
-  "Preview HTML should send the session token on local server requests."
+(ert-deftest doclive-test-preview-html-omits-token-from-server-calls ()
+  "Preview HTML should avoid sending bearer tokens on local server requests."
   (let ((html (doclive--preview-html)))
-    (should (string-match-p "currentToken=qs.get('token')" html))
-    (should (string-match-p "function authedPath" html))
+    (should-not (string-match-p "currentToken=qs.get('token')" html))
+    (should-not (string-match-p "function authedPath" html))
     (should (string-match-p
-             (regexp-quote "fetch(authedPath('/content?id='+encodeURIComponent(currentId))")
+             (regexp-quote "fetch('/content?id='+encodeURIComponent(currentId)")
              html))
     (should (string-match-p
-             (regexp-quote "fetch(authedPath('/open?id='+encodeURIComponent(currentId)+'&path='+encodeURIComponent(href))")
+             (regexp-quote "fetch('/open?id='+encodeURIComponent(currentId)+'&path='+encodeURIComponent(href)")
              html))
     (should (string-match-p
-             (regexp-quote "new EventSource(authedPath('/events?id='+encodeURIComponent(currentId)))")
+             (regexp-quote "new EventSource('/events?id='+encodeURIComponent(currentId))")
              html))
     (should (string-match-p
              (regexp-quote "history.replaceState({id:currentId},'',`?id=${encodeURIComponent(currentId)}`)")
@@ -912,6 +912,34 @@
         (doclive--server nil))
     (should-error (doclive-start-server) :type 'user-error)))
 
+(ert-deftest doclive-test-start-server-requires-opt-in-for-non-loopback-host ()
+  "Server startup should not expose previews beyond loopback by default."
+  (let ((doclive-host "0.0.0.0")
+        (doclive-port 39123)
+        (doclive--server nil)
+        (doclive-allow-non-loopback-host nil))
+    (should-error (doclive-start-server) :type 'user-error))
+  (let ((doclive-host "192.168.1.2")
+        (doclive-port 39123)
+        (doclive--server nil)
+        (doclive-allow-non-loopback-host nil))
+    (should-error (doclive-start-server) :type 'user-error))
+  (let ((doclive-host "localhost")
+        (doclive-port 39123)
+        (doclive--server nil)
+        (doclive-allow-non-loopback-host nil))
+    (should-not (doclive--validate-server-options)))
+  (let ((doclive-host "127.255.255.255")
+        (doclive-port 39123)
+        (doclive--server nil)
+        (doclive-allow-non-loopback-host nil))
+    (should-not (doclive--validate-server-options)))
+  (let ((doclive-host "0.0.0.0")
+        (doclive-port 39123)
+        (doclive--server nil)
+        (doclive-allow-non-loopback-host t))
+    (should-not (doclive--validate-server-options))))
+
 (ert-deftest doclive-test-http-response-sets-security-headers ()
   "HTTP responses should set browser hardening headers."
   (let ((response (doclive--http-response "200 OK" "text/plain" "body")))
@@ -1022,13 +1050,27 @@
   "Route authorization should require the current session token."
   (let ((doclive--server-token "secret token"))
     (should (doclive--authorized-request-p "/content?id=abc&token=secret+token"))
+    (should (doclive--authorized-request-p
+             "/content?id=abc" '(("cookie" . "doclive-token=secret token"))))
+    (should (doclive--authorized-request-p
+             "/content?id=abc" '(("cookie" . "other=x; doclive-token=secret token"))))
     (should-not (doclive--authorized-request-p "/content?id=abc"))
     (should-not (doclive--authorized-request-p "/content?id=abc&token=wrong"))
     (should-not (doclive--authorized-request-p "/content?id=abc&token=%ZZ"))
     (should-not (doclive--authorized-request-p "/content?id=abc&token=secret+token&x=%ZZ"))
     (should-not (doclive--authorized-request-p "/content?id=abc&token=secret+token&token=secret+token"))
     (should-not (doclive--authorized-request-p "/content?id=abc&token=secret+token&token=wrong"))
-    (should-not (doclive--authorized-request-p "/content?id=abc&token=%ZZ&token=secret+token"))))
+    (should-not (doclive--authorized-request-p "/content?id=abc&token=%ZZ&token=secret+token"))
+    (should-not (doclive--authorized-request-p
+                 "/content?id=abc" '(("cookie" . "doclive-token=wrong"))))
+    (should-not (doclive--authorized-request-p
+                 "/content?id=abc&x=%ZZ" '(("cookie" . "doclive-token=secret token"))))
+    (should-not (doclive--authorized-request-p
+                 "/content?id=abc&token=wrong&token=wrong"
+                 '(("cookie" . "doclive-token=secret token"))))
+    (should-not (doclive--authorized-request-p
+                 "/content?id=abc"
+                 '(("cookie" . "doclive-token=secret token; doclive-token=secret token"))))))
 
 (ert-deftest doclive-test-authorized-request-uses-secure-token-compare ()
   "Route authorization should use the hardened token comparison helper."
@@ -1100,6 +1142,8 @@
       (doclive--route-request 'fake-proc "/?token=secret")
       (should deleted)
       (should (string-match-p "200 OK" (mapconcat #'identity sent "")))
+      (should (string-match-p "Set-Cookie: doclive-token=secret; Path=/; SameSite=Strict; HttpOnly"
+                              (mapconcat #'identity sent "")))
       (should (string-match-p "preview" (mapconcat #'identity sent ""))))))
 
 (ert-deftest doclive-test-route-request-uses-response-nonce-not-token ()
@@ -1119,10 +1163,34 @@
       (let ((response (mapconcat #'identity sent "")))
         (should deleted)
         (should (string-match-p "200 OK" response))
+        (should (string-match-p "Set-Cookie: doclive-token=secret; Path=/; SameSite=Strict; HttpOnly" response))
         (should (string-match-p (regexp-quote "<script nonce='route-nonce'>") response))
         (should (string-match-p (regexp-quote "'nonce-route-nonce'") response))
         (should-not (string-match-p (regexp-quote "<script nonce='secret'>") response))
         (should-not (string-match-p (regexp-quote "'nonce-secret'") response))))))
+
+(ert-deftest doclive-test-route-request-allows-cookie-authorized-content ()
+  "Protected content routes should accept the HttpOnly session cookie."
+  (let ((doclive--server-token "secret")
+        (sent nil)
+        (deleted nil)
+        (called-id nil))
+    (cl-letf (((symbol-function 'doclive--json-for-id)
+               (lambda (id)
+                 (setq called-id id)
+                 "{\"ok\":true}"))
+              ((symbol-function 'process-send-string)
+               (lambda (_proc string)
+                 (push string sent)))
+              ((symbol-function 'delete-process)
+               (lambda (_proc)
+                 (setq deleted t))))
+      (doclive--route-request 'fake-proc "/content?id=abc"
+                              '(("cookie" . "doclive-token=secret")))
+      (should deleted)
+      (should (equal called-id "abc"))
+      (should (string-match-p "200 OK" (mapconcat #'identity sent "")))
+      (should (string-match-p "{\"ok\":true}" (mapconcat #'identity sent ""))))))
 
 (ert-deftest doclive-test-preview-file-rejects-unsupported-extension ()
   "Preview command should reject files outside the supported document set."
@@ -1358,14 +1426,17 @@
                             :noquery t)))
     (unwind-protect
         (cl-letf (((symbol-function 'doclive--route-request)
-                   (lambda (_proc path)
-                     (setq routed path))))
+                   (lambda (_proc path &optional headers)
+                     (setq routed (list path headers)))))
           (doclive--connection-filter proc "GET /preview?id=abc HTTP/1.1\r\nHo")
           (should-not routed)
           (should (equal (process-get proc 'doclive-request-buffer)
                          "GET /preview?id=abc HTTP/1.1\r\nHo"))
           (doclive--connection-filter proc "st: example\r\nUser-Agent: test\r\n\r\n")
-          (should (equal routed "/preview?id=abc"))
+          (should (equal (car routed) "/preview?id=abc"))
+          (should (equal (cadr routed)
+                         '(("host" . "example")
+                           ("user-agent" . "test"))))
           (should-not (process-get proc 'doclive-request-buffer)))
       (when (process-live-p proc)
         (delete-process proc)))))
@@ -1381,7 +1452,7 @@
                             :noquery t)))
     (unwind-protect
         (cl-letf (((symbol-function 'doclive--route-request)
-                   (lambda (_proc _path)
+                   (lambda (_proc _path &optional _headers)
                      (setq routed t)))
                   ((symbol-function 'process-send-string)
                    (lambda (_proc string)
@@ -1408,7 +1479,7 @@
         (doclive--max-request-bytes 32))
     (unwind-protect
         (cl-letf (((symbol-function 'doclive--route-request)
-                   (lambda (_proc _path)
+                   (lambda (_proc _path &optional _headers)
                      (setq routed t)))
                   ((symbol-function 'process-send-string)
                    (lambda (_proc string)
