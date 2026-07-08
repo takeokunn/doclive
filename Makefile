@@ -11,7 +11,12 @@ check: compile test lint package-lint autoloads security
 	git diff --check
 
 compile:
-	$(EMACS_BATCH) --eval '(setq byte-compile-error-on-warn t)' -f batch-byte-compile $(SRC) $(TEST)
+	@tmpdir=$$(mktemp -d "$${TMPDIR:-/tmp}/doclive-compile.XXXXXX"); \
+	trap 'rm -rf "$$tmpdir"' EXIT; \
+	mkdir -p "$$tmpdir/test"; \
+	cp $(SRC) "$$tmpdir/"; \
+	cp $(TEST) "$$tmpdir/test/"; \
+	(cd "$$tmpdir" && $(EMACS_BATCH) --eval '(setq byte-compile-error-on-warn t)' -f batch-byte-compile $(SRC) $(TEST))
 
 test:
 	$(EMACS_BATCH) -l test/doclive-test.el -f ert-run-tests-batch-and-exit
