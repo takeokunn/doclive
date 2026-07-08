@@ -866,7 +866,9 @@
   (should (doclive--valid-query-p "/content?id=abc&path=target.md"))
   (should-not (doclive--valid-query-p "/content?id=abc&id=def"))
   (should-not (doclive--valid-query-p "/open?path=one.md&path=two.md"))
+  (should-not (doclive--valid-query-p "/content?id=abc&debug"))
   (should-not (doclive--valid-query-p "/preview?token=secret"))
+  (should-not (doclive--valid-query-p "/preview?token"))
   (should-not (doclive--valid-query-p "/preview?Token=secret"))
   (should-not (doclive--valid-query-p "/preview?%74oken=secret")))
 
@@ -1233,7 +1235,7 @@
                (lambda (_proc)
                  (setq deleted t))))
       (doclive--route-request
-       'fake-proc "/preview?token=secret" '(("cookie" . "doclive-token=secret")))
+       'fake-proc "/preview?token" '(("cookie" . "doclive-token=secret")))
       (should deleted)
       (should (string-match-p "403 Forbidden" (mapconcat #'identity sent "")))
       (should-not (string-match-p "preview" (mapconcat #'identity sent ""))))))
