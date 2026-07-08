@@ -19,7 +19,10 @@
   - Local relative link navigation between =.md= and =.org= files, with back/forward support.
   - Debounced snapshot updates (150 ms) for smooth editing without CPU spikes.
   - Token-protected local preview endpoints for preview, content, link opening, and SSE.
+  - Preview pages remove bearer tokens from the visible browser URL after the initial authorized load.
   - Referrer suppression and nosniff headers on local HTTP responses.
+  - Inline preview runtime scripts use response-local CSP nonces separate from bearer tokens.
+  - HTTP request parsing accepts only GET origin-form paths.
   - SSE responses also send no-referrer, nosniff, and no-store cache headers.
   - Local linked document navigation stays under the source file directory by default.
   - Preview commands and linked-document navigation disable local-variable evaluation while opening files.

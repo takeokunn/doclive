@@ -169,7 +169,7 @@ they resolve under the current document's directory."
   "Maximum size of a buffered HTTP request header block.")
 
 (defconst doclive--request-line-regexp
-  "\\`GET \\([^[:space:]]+\\) HTTP/[0-9]+\\.[0-9]+\\(?:\r\\)?\\'"
+  "\\`GET \\(/[^[:space:]#]*\\) HTTP/[0-9]+\\.[0-9]+\\(?:\r\\)?\\'"
   "Regexp matching the supported HTTP request line format.")
 
 (defconst doclive--browser-security-base-headers

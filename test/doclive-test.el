@@ -728,7 +728,10 @@
   (should-not (doclive--parse-request-path "POST /x HTTP/1.1"))
   (should-not (doclive--parse-request-path "GET / HTTP/1.1 trailing"))
   (should-not (doclive--parse-request-path "GET  HTTP/1.1"))
-  (should-not (doclive--parse-request-path "GET / HTTP/1")))
+  (should-not (doclive--parse-request-path "GET / HTTP/1"))
+  (should-not (doclive--parse-request-path "GET http://127.0.0.1/preview HTTP/1.1"))
+  (should-not (doclive--parse-request-path "GET * HTTP/1.1"))
+  (should-not (doclive--parse-request-path "GET /preview#token HTTP/1.1")))
 
 (ert-deftest doclive-test-valid-request-line ()
   "Request line validator should reject malformed or ambiguous input."
@@ -737,6 +740,9 @@
   (should-not (doclive--valid-request-line-p "POST /preview?id=x HTTP/1.1"))
   (should-not (doclive--valid-request-line-p "GET /preview?id=x HTTP/1.1 extra"))
   (should-not (doclive--valid-request-line-p "GET /preview?id=x HTTP/1"))
+  (should-not (doclive--valid-request-line-p "GET http://127.0.0.1/preview HTTP/1.1"))
+  (should-not (doclive--valid-request-line-p "GET * HTTP/1.1"))
+  (should-not (doclive--valid-request-line-p "GET /preview#token HTTP/1.1"))
   (should-not (doclive--valid-request-line-p nil)))
 
 (ert-deftest doclive-test-query-param ()

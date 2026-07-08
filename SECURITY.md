@@ -28,7 +28,8 @@ Useful private report content:
 
 doclive starts a local HTTP server for preview rendering.  The default bind host
 is `127.0.0.1`, and preview routes require a per-session token.  Treat preview
-URLs as bearer secrets.
+URLs as bearer secrets.  After the initial authorized page load, the browser
+runtime removes the token query parameter from the visible URL and history.
 
 The preview intentionally renders user-controlled Markdown and Org content in a
 browser context.  The implementation therefore relies on:
@@ -37,6 +38,7 @@ browser context.  The implementation therefore relies on:
 - loopback binding by default
 - strict request parsing
 - Content-Security-Policy generated from configured browser asset origins
+- response-local CSP nonces that are separate from bearer tokens
 - pinned default browser assets
 - HTML sanitization before preview insertion
 - local linked-document confinement under the source directory by default

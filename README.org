@@ -122,10 +122,12 @@ M-x doclive-reload-page
 
 doclive はローカルHTTPサーバーを起動し、既定では =127.0.0.1= に bind します。
 プレビューURLにはセッションごとの =token= が含まれ、=/preview= / =/content= / =/open= / =/events= は token が一致しないリクエストを拒否します。
+初回読み込み後、preview runtime はブラウザの表示URLと履歴から =token= query parameter を削除します。
 サーバー停止時には token を破棄し、次回起動時に新しい token を生成します。
 また、バッファで =doclive-preview-mode= を無効化すると、そのバッファの preview entry、SSE client、更新 timer を削除し、以後は配信対象から外します。
 このURLは bearer secret として扱い、共有・ログ貼り付け・公開スクリーンショットへの写り込みを避けてください。
 preview HTML と HTTP response は =no-referrer= を設定し、token を含むURLが外部CDNへの Referer として送られないようにします。
+inline runtime script は bearer token とは別の response-local nonce で許可され、request-line は origin-form の絶対パスだけを受け付けます。
 
 非loopback hostに bind すると、同一ネットワーク上のブラウザからも到達可能になります。
 必要な場合だけ =doclive-host= を変更し、preview URL を信頼できる相手以外へ渡さないでください。
