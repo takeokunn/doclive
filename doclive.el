@@ -485,6 +485,12 @@ they resolve under the current document's directory."
   "Return non-nil when FILE has a previewable document extension."
   (member (downcase (or (file-name-extension file) "")) '("md" "org")))
 
+(defun doclive--previewable-document-file-p (file)
+  "Return non-nil when FILE is a readable regular Markdown or Org file."
+  (and (doclive--supported-document-file-p file)
+       (file-regular-p file)
+       (file-readable-p file)))
+
 (defun doclive--file-in-directory-p (file directory)
   "Return non-nil when FILE resolves under DIRECTORY."
   (let ((resolved-file (file-truename file))
@@ -510,14 +516,13 @@ they resolve under the current document's directory."
          (full (and target dir (expand-file-name target dir))))
     (cond
      ((not full) nil)
-     ((and (file-exists-p full)
-           (doclive--supported-document-file-p full)
+     ((and (doclive--previewable-document-file-p full)
            (doclive--linked-document-allowed-p full dir))
       full)
      ((string= (downcase (or (file-name-extension full) "")) "html")
       (cl-loop for ext in '("org" "md")
                for candidate = (concat (file-name-sans-extension full) "." ext)
-               when (and (file-exists-p candidate)
+               when (and (doclive--previewable-document-file-p candidate)
                          (doclive--linked-document-allowed-p candidate dir))
                return candidate))
      (t nil))))

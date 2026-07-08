@@ -318,8 +318,26 @@
              (should-not (doclive--resolve-linked-document entry "file:target.md"))
              (should-not (doclive--resolve-linked-document entry "/tmp/target.md"))
              (should (doclive--resolve-linked-document entry "target.org?x=y#heading")))
-        (when (buffer-live-p buf)
-          (kill-buffer buf)))))))
+         (when (buffer-live-p buf)
+           (kill-buffer buf)))))))
+
+(ert-deftest doclive-test-linked-document-rejects-non-regular-targets ()
+  "Resolver should not open directories masquerading as documents."
+  (doclive-test--with-temp-linked-files
+   '(("source.md" . "# Source\n"))
+   (lambda (dir)
+     (let* ((target (expand-file-name "target.md" dir))
+            (html-source (expand-file-name "exported.org" dir))
+            (buf (find-file-noselect (expand-file-name "source.md" dir)))
+            (entry (doclive--snapshot-buffer buf)))
+       (make-directory target)
+       (make-directory html-source)
+       (unwind-protect
+           (progn
+             (should-not (doclive--resolve-linked-document entry "target.md"))
+             (should-not (doclive--resolve-linked-document entry "exported.html")))
+         (when (buffer-live-p buf)
+           (kill-buffer buf)))))))
 
 (ert-deftest doclive-test-linked-document-stays-under-source-directory ()
   "Resolver should reject parent-directory traversal by default."
