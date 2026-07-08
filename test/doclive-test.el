@@ -40,6 +40,12 @@
       (insert-file-contents file)
       (buffer-string))))
 
+(defun doclive-test--file-string (file)
+  "Return repository FILE contents as a string."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name file default-directory))
+    (buffer-string)))
+
 (defun doclive-test--commentary-section ()
   "Return the Commentary section from doclive.el."
   (with-temp-buffer
@@ -65,8 +71,33 @@
     (should (string-match-p (regexp-quote ";; Author: takeokunn") source))
     (should (string-match-p (regexp-quote ";; Assisted-by: OpenAI Codex: GPT-5") source))
     (should (string-match-p (regexp-quote ";; Maintainer: takeokunn") source))
+    (should (string-match-p (regexp-quote ";; Keywords: markdown, org, tools, convenience") source))
     (should-not (string-match-p (regexp-quote ";; Author: doclive contributors") source))
     (should-not (string-match-p (regexp-quote ";; Maintainer: doclive contributors") source))))
+
+(ert-deftest doclive-test-release-docs-match-security-model ()
+  "Release-facing docs should describe the current preview security model."
+  (let ((security (doclive-test--file-string "SECURITY.md"))
+        (news (doclive-test--file-string "NEWS.org")))
+    (should (string-match-p (regexp-quote "short-lived, single-use bootstrap code") security))
+    (should (string-match-p (regexp-quote "redirects to a token-free preview URL") security))
+    (should (string-match-p (regexp-quote "instead of a query token") security))
+    (should-not (string-match-p (regexp-quote "Treat preview URLs as bearer secrets") security))
+    (should (string-match-p (regexp-quote "short-lived single-use bootstrap codes") news))
+    (should (string-match-p (regexp-quote "long-lived session token") news))))
+
+(ert-deftest doclive-test-release-docs-cover-primary-user-claims ()
+  "Release-facing docs should cover the package's public capability claims."
+  (let ((readme (doclive-test--file-string "README.org"))
+        (contributing (doclive-test--file-string "CONTRIBUTING.org"))
+        (news (doclive-test--file-string "NEWS.org")))
+    (should (string-match-p (regexp-quote "Markdown / Org") readme))
+    (should (string-match-p (regexp-quote "SSE") readme))
+    (should (string-match-p (regexp-quote "MELPA") readme))
+    (should (string-match-p (regexp-quote "README.org") contributing))
+    (should (string-match-p (regexp-quote "NEWS.org") contributing))
+    (should (string-match-p (regexp-quote "Release gate includes byte-compilation") news))
+    (should (string-match-p (regexp-quote "GitHub Actions security checks") news))))
 
 (ert-deftest doclive-test-commentary-section-describes-package ()
   "Commentary should contain a meaningful package description."
@@ -875,31 +906,40 @@
       (should (equal (doclive--ensure-server-token) "session-token"))
       (should (= calls 1)))))
 
-(ert-deftest doclive-test-preview-url-includes-session-token ()
-  "Preview URL should include the server token required by local routes."
+(ert-deftest doclive-test-preview-url-uses-bootstrap-code-not-session-token ()
+  "Preview URL should use a short-lived bootstrap code, not the session token."
   (let ((doclive-host "127.0.0.1")
         (doclive-port 39123)
-        (doclive--server-token nil))
+        (doclive--server-token nil)
+        (doclive--bootstrap-codes (make-hash-table :test #'equal))
+        (tokens '("session-token" "bootstrap-code")))
     (with-temp-buffer
-      (let ((url (doclive--preview-url (current-buffer))))
+      (cl-letf (((symbol-function 'doclive--random-token)
+                 (lambda ()
+                   (pop tokens))))
+        (let ((url (doclive--preview-url (current-buffer))))
         (should doclive--server-token)
-        (should (string-match-p
-                 (regexp-quote (concat "token=" (url-hexify-string doclive--server-token)))
-                 url))
+        (should-not (string-match-p (regexp-quote "token=") url))
+        (should-not (string-match-p (regexp-quote doclive--server-token) url))
+        (should (string-match-p (regexp-quote "bootstrap=bootstrap-code") url))
+        (should (gethash "bootstrap-code" doclive--bootstrap-codes))
         (should (string-match-p
                  (regexp-quote (concat "id=" (url-hexify-string (doclive--buffer-id (current-buffer)))))
-                 url))))))
+                 url)))))))
 
-(ert-deftest doclive-test-stop-server-clears-session-token ()
-  "Stopping the server should invalidate URLs from the old session."
+(ert-deftest doclive-test-stop-server-clears-session-state ()
+  "Stopping the server should invalidate tokens and bootstrap codes."
   (let ((doclive--server nil)
         (doclive--server-token "old-token")
+        (doclive--bootstrap-codes (make-hash-table :test #'equal))
         (doclive--change-timers (make-hash-table :test #'equal))
         (doclive--sse-clients (make-hash-table :test #'equal)))
+    (puthash "bootstrap-code" '(:id "abc" :expires 9999999999) doclive--bootstrap-codes)
     (cl-letf (((symbol-function 'message)
                (lambda (&rest _args) nil)))
       (doclive-stop-server))
-    (should-not doclive--server-token)))
+    (should-not doclive--server-token)
+    (should (= (hash-table-count doclive--bootstrap-codes) 0))))
 
 (ert-deftest doclive-test-start-server-validates-host-and-port ()
   "Server startup should reject malformed local server settings."
@@ -1173,6 +1213,35 @@
         (should-not (string-match-p (regexp-quote "<script nonce='secret'>") response))
         (should-not (string-match-p (regexp-quote "'nonce-secret'") response))))))
 
+(ert-deftest doclive-test-route-request-consumes-bootstrap-code-once ()
+  "Preview bootstrap codes should set the session cookie and be single-use."
+  (let ((doclive--server-token "secret")
+        (doclive--bootstrap-codes (make-hash-table :test #'equal))
+        (sent nil)
+        (deleted nil))
+    (puthash "bootstrap-code"
+             (list :id "abc" :expires (+ (float-time) 30))
+             doclive--bootstrap-codes)
+    (cl-letf (((symbol-function 'process-send-string)
+               (lambda (_proc string)
+                 (push string sent)))
+              ((symbol-function 'delete-process)
+               (lambda (_proc)
+                 (setq deleted t))))
+      (doclive--route-request 'fake-proc "/preview?id=abc&bootstrap=bootstrap-code")
+      (let ((response (mapconcat #'identity sent "")))
+        (should deleted)
+        (should (string-match-p "303 See Other" response))
+        (should (string-match-p "Set-Cookie: doclive-token=secret; Path=/; SameSite=Strict; HttpOnly" response))
+        (should (string-match-p (regexp-quote "Location: /preview?id=abc") response))
+        (should-not (string-match-p (regexp-quote "bootstrap-code") response))
+        (should-not (gethash "bootstrap-code" doclive--bootstrap-codes)))
+      (setq sent nil
+            deleted nil)
+      (doclive--route-request 'fake-proc "/preview?id=abc&bootstrap=bootstrap-code")
+      (should deleted)
+      (should (string-match-p "403 Forbidden" (mapconcat #'identity sent ""))))))
+
 (ert-deftest doclive-test-route-request-allows-cookie-authorized-content ()
   "Protected content routes should accept the HttpOnly session cookie."
   (let ((doclive--server-token "secret")
@@ -1442,6 +1511,30 @@
                          '(("host" . "example")
                            ("user-agent" . "test"))))
           (should-not (process-get proc 'doclive-request-buffer)))
+      (when (process-live-p proc)
+        (delete-process proc)))))
+
+(ert-deftest doclive-test-connection-filter-ignores-post-header-bytes ()
+  "Connection filter should not parse bytes after the header block as headers."
+  (let ((doclive--server-token "secret")
+        (sent nil)
+        (deleted nil)
+        (proc (make-process :name "doclive-test-post-header"
+                            :buffer nil
+                            :command '("cat")
+                            :noquery t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'process-send-string)
+                   (lambda (_proc string)
+                     (push string sent)))
+                  ((symbol-function 'delete-process)
+                   (lambda (_proc)
+                     (setq deleted t))))
+          (doclive--connection-filter
+           proc
+           "GET /content?id=abc HTTP/1.1\r\nHost: example\r\n\r\nCookie: doclive-token=secret\r\n")
+          (should deleted)
+          (should (string-match-p "403 Forbidden" (mapconcat #'identity sent ""))))
       (when (process-live-p proc)
         (delete-process proc)))))
 

@@ -8,7 +8,7 @@
 ;; URL: https://github.com/takeokunn/doclive
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "28.1"))
-;; Keywords: markdown, tools, convenience
+;; Keywords: markdown, org, tools, convenience
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;;
 ;; This file is not part of GNU Emacs.
@@ -165,6 +165,9 @@ they resolve under the current document's directory."
 (defvar doclive--server-token nil
   "Session token required by doclive HTTP endpoints.")
 
+(defvar doclive--bootstrap-codes (make-hash-table :test #'equal)
+  "Single-use preview bootstrap codes keyed by code string.")
+
 (defvar doclive--buffers (make-hash-table :test #'equal)
   "Hash table of tracked buffer entries keyed by buffer-id.")
 
@@ -176,6 +179,9 @@ they resolve under the current document's directory."
 
 (defvar doclive--max-request-bytes 16384
   "Maximum size of a buffered HTTP request header block.")
+
+(defconst doclive--bootstrap-code-ttl-seconds 30
+  "Lifetime in seconds for single-use preview bootstrap codes.")
 
 (defconst doclive--request-line-regexp
   "\\`GET \\(/[^[:space:]#]*\\) HTTP/[0-9]+\\.[0-9]+\\(?:\r\\)?\\'"
@@ -348,6 +354,15 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
   "Return the session token for the local preview server."
   (or doclive--server-token
       (setq doclive--server-token (doclive--random-token))))
+
+(defun doclive--create-bootstrap-code (id)
+  "Create and return a single-use preview bootstrap code for ID."
+  (let ((code (doclive--random-token)))
+    (puthash code
+             (list :id id
+                   :expires (+ (float-time) doclive--bootstrap-code-ttl-seconds))
+             doclive--bootstrap-codes)
+    code))
 
 (defun doclive--secure-string-equal-p (left right)
   "Return non-nil when LEFT and RIGHT are equal without early exit."
@@ -931,6 +946,50 @@ runtime script and style when it is safe for CSP nonce use."
              (and (stringp cookie-token)
                   (doclive--secure-string-equal-p cookie-token doclive--server-token))))))
 
+(defun doclive--consume-bootstrap-code-p (path)
+  "Return non-nil if PATH has a valid single-use preview bootstrap code."
+  (and (doclive--valid-query-p path)
+       (let* ((id (doclive--query-param path "id"))
+              (code (doclive--query-param path "bootstrap"))
+              (entry (and code (gethash code doclive--bootstrap-codes))))
+         (when code
+           (remhash code doclive--bootstrap-codes))
+         (and (stringp id)
+              (doclive--safe-cookie-token-p code)
+              entry
+              (string= id (plist-get entry :id))
+              (<= (float-time) (plist-get entry :expires))))))
+
+(defun doclive--preview-redirect-location (path)
+  "Return a token-free preview redirect location derived from PATH."
+  (format "/preview?id=%s"
+          (url-hexify-string (or (doclive--query-param path "id") ""))))
+
+(defun doclive--send-preview (proc)
+  "Send the preview page on PROC and close it."
+  (let ((script-nonce (doclive--random-token))
+        (cookie-header (doclive--session-cookie-header)))
+    (process-send-string
+     proc
+     (doclive--http-response "200 OK" "text/html"
+                              (doclive--preview-html script-nonce)
+                              script-nonce
+                              (and cookie-header (list cookie-header))))
+    (delete-process proc)))
+
+(defun doclive--send-bootstrap-redirect (proc path)
+  "Set the preview session cookie and redirect PROC to token-free PATH."
+  (let ((cookie-header (doclive--session-cookie-header)))
+    (process-send-string
+     proc
+     (doclive--http-response "303 See Other" "text/plain" ""
+                              nil
+                              (append
+                               (list (format "Location: %s\r\n"
+                                             (doclive--preview-redirect-location path)))
+                               (and cookie-header (list cookie-header)))))
+    (delete-process proc)))
+
 (defun doclive--send-forbidden (proc)
   "Send a forbidden response on PROC and close it."
   (process-send-string proc (doclive--http-response "403 Forbidden" "text/plain" "Forbidden"))
@@ -939,18 +998,18 @@ runtime script and style when it is safe for CSP nonce use."
 (defun doclive--route-request (proc path &optional headers)
   "Route request on PROC for PATH and optional HEADERS."
   (cond
-   ((or (doclive--route-matches-p path "/") (doclive--route-matches-p path "/preview"))
+   ((doclive--route-matches-p path "/")
     (if (doclive--authorized-request-p path headers)
-        (let ((script-nonce (doclive--random-token))
-              (cookie-header (doclive--session-cookie-header)))
-          (process-send-string
-           proc
-           (doclive--http-response "200 OK" "text/html"
-                                    (doclive--preview-html script-nonce)
-                                    script-nonce
-                                    (and cookie-header (list cookie-header))))
-          (delete-process proc))
+        (doclive--send-preview proc)
       (doclive--send-forbidden proc)))
+   ((doclive--route-matches-p path "/preview")
+    (cond
+     ((doclive--authorized-request-p path headers)
+      (doclive--send-preview proc))
+     ((doclive--consume-bootstrap-code-p path)
+      (doclive--send-bootstrap-redirect proc path))
+     (t
+      (doclive--send-forbidden proc))))
    ((doclive--route-matches-p path "/content")
     (if (doclive--authorized-request-p path headers)
         (let ((id (doclive--query-param path "id")))
@@ -1025,9 +1084,10 @@ runtime script and style when it is safe for CSP nonce use."
       (if (not (string-match-p "\r\n\r\n" buffer))
           (process-put proc 'doclive-request-buffer buffer)
         (process-put proc 'doclive-request-buffer nil)
-        (let* ((line (car (split-string buffer "\r\n" t)))
+        (let* ((head (substring buffer 0 (string-match "\r\n\r\n" buffer)))
+               (line (car (split-string head "\r\n" t)))
                (path (doclive--parse-request-path line))
-               (headers (doclive--parse-request-headers buffer)))
+               (headers (doclive--parse-request-headers head)))
           (if (not (doclive--valid-request-line-p line))
               (progn
                 (process-send-string proc (doclive--http-response "400 Bad Request" "text/plain" "Bad Request"))
@@ -1103,6 +1163,7 @@ runtime script and style when it is safe for CSP nonce use."
     (delete-process doclive--server))
   (setq doclive--server nil)
   (setq doclive--server-token nil)
+  (clrhash doclive--bootstrap-codes)
   (maphash (lambda (_id clients)
              (dolist (proc clients)
                (when (process-live-p proc)
@@ -1115,11 +1176,13 @@ runtime script and style when it is safe for CSP nonce use."
 
 (defun doclive--preview-url (buffer)
   "Return preview URL for BUFFER."
-  (format "http://%s:%d/preview?id=%s&token=%s"
-          doclive-host
-          doclive-port
-          (url-hexify-string (doclive--buffer-id buffer))
-          (url-hexify-string (doclive--ensure-server-token))))
+  (let ((id (doclive--buffer-id buffer)))
+    (doclive--ensure-server-token)
+    (format "http://%s:%d/preview?id=%s&bootstrap=%s"
+            doclive-host
+            doclive-port
+            (url-hexify-string id)
+            (url-hexify-string (doclive--create-bootstrap-code id)))))
 
 (defvar doclive-preview-mode)
 

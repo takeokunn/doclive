@@ -27,12 +27,12 @@ Useful private report content:
 ## Security Model
 
 doclive starts a local HTTP server for preview rendering.  The default bind host
-is `127.0.0.1`, and preview routes require a per-session token.  Treat preview
-URLs as bearer secrets.  After the initial authorized page load, the browser
-runtime removes the token query parameter from the visible URL and history.
-The initial authorized `/preview` response sets a `doclive-token` cookie with
-`HttpOnly` and `SameSite=Strict`; subsequent `/content`, `/open`, and `/events`
-requests are authorized by that cookie instead of a query token.
+is `127.0.0.1`, and preview routes require a per-session token.  Preview URLs
+use a short-lived, single-use bootstrap code rather than the long-lived session
+token.  A valid bootstrap request sets a `doclive-token` cookie with `HttpOnly`
+and `SameSite=Strict`, then redirects to a token-free preview URL.  Subsequent
+`/content`, `/open`, and `/events` requests are authorized by that cookie
+instead of a query token.
 
 Binding to a non-loopback host requires changing `doclive-host` and explicitly
 setting `doclive-allow-non-loopback-host` to non-nil.
