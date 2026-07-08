@@ -888,6 +888,8 @@
   "Query parameter parser should fail closed on decoded control characters."
   (should-not (doclive--query-param "/content?id=%0d%0aX:%20y" "id"))
   (should-not (doclive--query-param "/content?%0d=id" "id"))
+  (should-not (doclive--query-param "/content?id=ok&%0d" "id"))
+  (should-not (doclive--query-param "/content?id=ok&bad%00" "id"))
   (should-not (doclive--query-param "/open?id=a&path=target%00.md" "path")))
 
 (ert-deftest doclive-test-valid-query-rejects-ambiguous-or-token-keys ()
@@ -1464,6 +1466,37 @@
         (should deleted)
         (should (string-match-p "403 Forbidden" response))
         (should (gethash "bootstrap-code" doclive--bootstrap-codes))))))
+
+(ert-deftest doclive-test-route-request-does-not-consume-invalid-bootstrap-code ()
+  "Invalid preview bootstrap requests should not burn tracked codes."
+  (let ((doclive--server-token "secret")
+        (doclive--bootstrap-codes (make-hash-table :test #'equal))
+        (sent nil)
+        (deleted nil))
+    (puthash "wrong-id-code"
+             (list :id "abc" :expires (+ (float-time) 30))
+             doclive--bootstrap-codes)
+    (puthash "expired-code"
+             (list :id "abc" :expires (- (float-time) 30))
+             doclive--bootstrap-codes)
+    (cl-letf (((symbol-function 'process-send-string)
+               (lambda (_proc string)
+                 (push string sent)))
+              ((symbol-function 'delete-process)
+               (lambda (_proc)
+                 (setq deleted t))))
+      (doclive--route-request 'fake-proc "/preview?id=def&bootstrap=wrong-id-code")
+      (let ((response (mapconcat #'identity sent "")))
+        (should deleted)
+        (should (string-match-p "403 Forbidden" response))
+        (should (gethash "wrong-id-code" doclive--bootstrap-codes)))
+      (setq sent nil
+            deleted nil)
+      (doclive--route-request 'fake-proc "/preview?id=abc&bootstrap=expired-code")
+      (let ((response (mapconcat #'identity sent "")))
+        (should deleted)
+        (should (string-match-p "403 Forbidden" response))
+        (should (gethash "expired-code" doclive--bootstrap-codes))))))
 
 (ert-deftest doclive-test-route-request-allows-cookie-authorized-content ()
   "Protected content routes should accept the HttpOnly session cookie."

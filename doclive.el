@@ -864,8 +864,11 @@ runtime script and style when it is safe for CSP nonce use."
           invalid)
       (dolist (p pairs (and (not invalid) (not duplicate) found))
         (if (not (string-match "=" p))
-            (unless (doclive--decode-query-component p)
-              (setq invalid t))
+            (let ((decoded-segment (and (not (doclive--unsafe-raw-query-component-p p))
+                                        (doclive--decode-query-component p))))
+              (when (or (null decoded-segment)
+                        (doclive--unsafe-query-component-p decoded-segment))
+                (setq invalid t)))
           (let* ((eq (match-beginning 0))
                  (raw-key (substring p 0 eq))
                  (raw-value (substring p (1+ eq)))
@@ -1065,13 +1068,14 @@ runtime script and style when it is safe for CSP nonce use."
        (let* ((id (doclive--query-param path "id"))
               (code (doclive--query-param path "bootstrap"))
               (entry (and code (gethash code doclive--bootstrap-codes))))
-         (when code
-           (remhash code doclive--bootstrap-codes))
          (and (stringp id)
               (doclive--safe-cookie-token-p code)
               entry
               (string= id (plist-get entry :id))
-              (<= (float-time) (plist-get entry :expires))))))
+              (<= (float-time) (plist-get entry :expires))
+              (progn
+                (remhash code doclive--bootstrap-codes)
+                t)))))
 
 (defun doclive--preview-redirect-location (path)
   "Return a token-free preview redirect location derived from PATH."
