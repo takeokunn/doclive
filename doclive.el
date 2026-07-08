@@ -634,9 +634,11 @@ Return nil when VALUE is not valid percent-encoded data."
 
 (defun doclive--file-in-directory-p (file directory)
   "Return non-nil when FILE resolves under DIRECTORY."
-  (let ((resolved-file (file-truename file))
-        (resolved-dir (file-name-as-directory (file-truename directory))))
-    (string-prefix-p resolved-dir resolved-file)))
+  (condition-case nil
+      (let ((resolved-file (file-truename file))
+            (resolved-dir (file-name-as-directory (file-truename directory))))
+        (string-prefix-p resolved-dir resolved-file))
+    (file-error nil)))
 
 (defun doclive--linked-document-allowed-p (file directory)
   "Return non-nil when FILE may be opened from DIRECTORY."

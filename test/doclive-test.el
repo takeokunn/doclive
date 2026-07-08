@@ -452,6 +452,15 @@
          (when (buffer-live-p buf)
            (kill-buffer buf)))))))
 
+(ert-deftest doclive-test-linked-document-truename-errors-fail-closed ()
+  "Resolver should reject links when realpath resolution fails."
+  (let ((entry '(:file "/tmp/doclive/source.md")))
+    (cl-letf (((symbol-function 'file-regular-p) (lambda (_file) t))
+              ((symbol-function 'file-readable-p) (lambda (_file) t))
+              ((symbol-function 'file-truename)
+               (lambda (_file) (signal 'file-error '("realpath failed")))))
+      (should-not (doclive--resolve-linked-document entry "target.md")))))
+
 (ert-deftest doclive-test-supported-document-file-p ()
   "Supported document check should allow only Markdown and Org files."
   (should (doclive--supported-document-file-p "README.md"))
