@@ -209,6 +209,10 @@ emacs -Q --batch -L . -l doclive.el \
 脆弱性の詳細を public issue に書かないでください。
 報告手順と現在のセキュリティ境界は =SECURITY.md= にまとめています。
 
+* Support
+
+質問、不具合報告、機能要望、脆弱性報告の切り分けは =SUPPORT.md= を参照してください。
+
 * License
 
 doclive は GPL-3.0-or-later で配布されています。

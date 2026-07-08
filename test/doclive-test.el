@@ -109,14 +109,19 @@
   "Release-facing docs should cover the package's public capability claims."
   (let ((readme (doclive-test--file-string "README.org"))
         (contributing (doclive-test--file-string "CONTRIBUTING.org"))
-        (news (doclive-test--file-string "NEWS.org")))
+        (news (doclive-test--file-string "NEWS.org"))
+        (support (doclive-test--file-string "SUPPORT.md")))
     (should (string-match-p (regexp-quote "Markdown / Org") readme))
     (should (string-match-p (regexp-quote "SSE") readme))
     (should (string-match-p (regexp-quote "MELPA") readme))
+    (should (string-match-p (regexp-quote "SUPPORT.md") readme))
+    (should (string-match-p (regexp-quote "LICENSE") readme))
     (should (string-match-p (regexp-quote "README.org") contributing))
     (should (string-match-p (regexp-quote "NEWS.org") contributing))
     (should (string-match-p (regexp-quote "Release gate includes byte-compilation") news))
-    (should (string-match-p (regexp-quote "GitHub Actions security checks") news))))
+    (should (string-match-p (regexp-quote "GitHub Actions security checks") news))
+    (should (string-match-p (regexp-quote "SECURITY.md") support))
+    (should (string-match-p (regexp-quote "local paths and tokens removed") support))))
 
 (ert-deftest doclive-test-commentary-section-describes-package ()
   "Commentary should contain a meaningful package description."
