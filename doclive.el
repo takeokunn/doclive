@@ -93,8 +93,8 @@
 
 (defcustom doclive-allow-non-loopback-host nil
   "Whether doclive may bind the preview server to non-loopback hosts.
-Keep this nil unless you understand that preview URLs authorize access
-to local document contents with a bearer token."
+Keep this nil unless you understand that the preview server grants
+cookie-authenticated access to local document contents."
   :type 'boolean
   :group 'doclive)
 
@@ -737,7 +737,7 @@ runtime script and style when it is safe for CSP nonce use."
      (if nonce (concat " nonce='" (doclive--escape-html-attribute nonce) "'") ""))
    ">"
    "const qs=new URLSearchParams(location.search); let currentId=qs.get('id');"
-   "function scrubTokenFromLocation(){if(!qs.has('token')) return; const clean=new URLSearchParams(qs); clean.delete('token'); const q=clean.toString(); history.replaceState({id:currentId},'',q?'?'+q:location.pathname);}"
+   "function scrubSensitiveQueryFromLocation(){if(!qs.has('bootstrap')&&!qs.has('token')) return; const clean=new URLSearchParams(qs); clean.delete('bootstrap'); clean.delete('token'); const q=clean.toString(); history.replaceState({id:currentId},'',q?'?'+q:location.pathname);}"
    "const statusEl=document.getElementById('status'); const mdEl=document.getElementById('md'); const tocEl=document.getElementById('toc');"
    "const searchEl=document.getElementById('search'); const pinEl=document.getElementById('pin'); const chipsEl=document.getElementById('chips');"
    "const themeEl=document.getElementById('theme'); const dotEl=document.getElementById('dot');"
@@ -820,7 +820,7 @@ runtime script and style when it is safe for CSP nonce use."
    "document.getElementById('back').addEventListener('click',async()=>{if(navIndex<=0) return; navIndex--; currentId=navStack[navIndex].id; updateNavButtons(); lastRev=-1; connectSSE(); const j=await fetchContent(); await applyContent(j);});"
    "document.getElementById('forward').addEventListener('click',async()=>{if(navIndex>=navStack.length-1) return; navIndex++; currentId=navStack[navIndex].id; updateNavButtons(); lastRev=-1; connectSSE(); const j=await fetchContent(); await applyContent(j);});"
    "applyTheme(localStorage.getItem('doclive-theme'));"
-   "scrubTokenFromLocation();"
+   "scrubSensitiveQueryFromLocation();"
    "(async()=>{try{const j=await fetchContent(); await applyContent(j);}catch(e){statusEl.textContent='initial load failed'; dotEl.className='dot dot-disconnected';} connectSSE();})();"
    "</script></body></html>"))
 
@@ -936,15 +936,12 @@ runtime script and style when it is safe for CSP nonce use."
    "retry: 1200\n\n"))
 
 (defun doclive--authorized-request-p (path &optional headers)
-  "Return non-nil if PATH or HEADERS has the current server token."
+  "Return non-nil if PATH is valid and HEADERS has the current token cookie."
   (and (doclive--valid-query-p path)
        (stringp doclive--server-token)
-       (let ((query-token (doclive--query-param path "token"))
-             (cookie-token (doclive--cookie-token headers)))
-         (or (and (stringp query-token)
-                  (doclive--secure-string-equal-p query-token doclive--server-token))
-             (and (stringp cookie-token)
-                  (doclive--secure-string-equal-p cookie-token doclive--server-token))))))
+       (let ((cookie-token (doclive--cookie-token headers)))
+         (and (stringp cookie-token)
+              (doclive--secure-string-equal-p cookie-token doclive--server-token)))))
 
 (defun doclive--consume-bootstrap-code-p (path)
   "Return non-nil if PATH has a valid single-use preview bootstrap code."

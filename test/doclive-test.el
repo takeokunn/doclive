@@ -78,13 +78,25 @@
 (ert-deftest doclive-test-release-docs-match-security-model ()
   "Release-facing docs should describe the current preview security model."
   (let ((security (doclive-test--file-string "SECURITY.md"))
+        (readme (doclive-test--file-string "README.org"))
+        (melpa-notes (doclive-test--file-string "docs/MELPA_SUBMISSION.org"))
         (news (doclive-test--file-string "NEWS.org")))
     (should (string-match-p (regexp-quote "short-lived, single-use bootstrap code") security))
     (should (string-match-p (regexp-quote "redirects to a token-free preview URL") security))
     (should (string-match-p (regexp-quote "instead of a query token") security))
     (should-not (string-match-p (regexp-quote "Treat preview URLs as bearer secrets") security))
+    (should (string-match-p (regexp-quote "short-lived single-use bootstrap code") readme))
+    (should (string-match-p (regexp-quote "token-free preview URL") readme))
+    (should-not (string-match-p (regexp-quote "プレビューURLにはセッションごとの =token= が含まれ") readme))
+    (should-not (string-match-p (regexp-quote "初回読み込み後、preview runtime はブラウザの表示URLと履歴から =token= query parameter を削除します") readme))
+    (should-not (string-match-p (regexp-quote "このURLは bearer secret") readme))
+    (should-not (string-match-p (regexp-quote "token を含むURL") readme))
+    (should (string-match-p (regexp-quote "short-lived single-use bootstrap code") melpa-notes))
+    (should (string-match-p (regexp-quote "token-free preview URL") melpa-notes))
+    (should-not (string-match-p (regexp-quote "routes with a per-session bearer token") melpa-notes))
     (should (string-match-p (regexp-quote "short-lived single-use bootstrap codes") news))
-    (should (string-match-p (regexp-quote "long-lived session token") news))))
+    (should (string-match-p (regexp-quote "long-lived session token") news))
+    (should-not (string-match-p (regexp-quote "Preview pages remove bearer tokens from the visible browser URL") news))))
 
 (ert-deftest doclive-test-release-docs-cover-primary-user-claims ()
   "Release-facing docs should cover the package's public capability claims."
@@ -769,11 +781,12 @@
       html))))
 
 (ert-deftest doclive-test-preview-html-scrubs-token-from-history ()
-  "Preview HTML should remove bearer tokens from the visible browser URL."
+  "Preview HTML should remove bootstrap leftovers from the visible browser URL."
   (let ((html (doclive--preview-html)))
-    (should (string-match-p "function scrubTokenFromLocation" html))
+    (should (string-match-p "function scrubSensitiveQueryFromLocation" html))
+    (should (string-match-p (regexp-quote "clean.delete('bootstrap')") html))
     (should (string-match-p (regexp-quote "clean.delete('token')") html))
-    (should (string-match-p (regexp-quote "scrubTokenFromLocation();") html))
+    (should (string-match-p (regexp-quote "scrubSensitiveQueryFromLocation();") html))
     (should (string-match-p
              (regexp-quote "history.replaceState({id:currentId},'',q?'?'+q:location.pathname)")
              html))))
@@ -1087,9 +1100,9 @@
   (should-not (doclive--secure-string-equal-p nil "secret")))
 
 (ert-deftest doclive-test-authorized-request-requires-current-token ()
-  "Route authorization should require the current session token."
+  "Route authorization should require the current session token cookie."
   (let ((doclive--server-token "secret-token_1.2~3"))
-    (should (doclive--authorized-request-p "/content?id=abc&token=secret-token_1.2~3"))
+    (should-not (doclive--authorized-request-p "/content?id=abc&token=secret-token_1.2~3"))
     (should (doclive--authorized-request-p
              "/content?id=abc" '(("cookie" . "doclive-token=secret-token_1.2~3"))))
     (should (doclive--authorized-request-p
@@ -1112,7 +1125,7 @@
     (should-not (doclive--authorized-request-p
                  "/content?id=abc&token=wrong&token=wrong"
                  '(("cookie" . "doclive-token=secret-token_1.2~3"))))
-    (should-not (doclive--authorized-request-p
+      (should-not (doclive--authorized-request-p
                  "/content?id=abc"
                  '(("cookie" . "doclive-token=secret-token_1.2~3; doclive-token=secret-token_1.2~3"))))))
 
@@ -1124,7 +1137,8 @@
                (lambda (left right)
                  (setq seen (list left right))
                  t)))
-      (should (doclive--authorized-request-p "/content?id=abc&token=provided"))
+      (should (doclive--authorized-request-p
+               "/content?id=abc" '(("cookie" . "doclive-token=provided"))))
       (should (equal seen '("provided" "secret"))))))
 
 (ert-deftest doclive-test-route-request-rejects-prefix-collisions ()
@@ -1170,8 +1184,8 @@
       (should (string-match-p "403 Forbidden" (mapconcat #'identity sent "")))
       (should (string-match-p "Forbidden" (mapconcat #'identity sent ""))))))
 
-(ert-deftest doclive-test-route-request-allows-authorized-root-with-query ()
-  "Root route should accept a token query parameter."
+(ert-deftest doclive-test-route-request-rejects-token-query ()
+  "Root route should reject token query parameters."
   (let ((doclive--server-token "secret")
         (sent nil)
         (deleted nil))
@@ -1185,10 +1199,10 @@
                  (setq deleted t))))
       (doclive--route-request 'fake-proc "/?token=secret")
       (should deleted)
-      (should (string-match-p "200 OK" (mapconcat #'identity sent "")))
-      (should (string-match-p "Set-Cookie: doclive-token=secret; Path=/; SameSite=Strict; HttpOnly"
-                              (mapconcat #'identity sent "")))
-      (should (string-match-p "preview" (mapconcat #'identity sent ""))))))
+      (should (string-match-p "403 Forbidden" (mapconcat #'identity sent "")))
+      (should-not (string-match-p "Set-Cookie: doclive-token=secret; Path=/; SameSite=Strict; HttpOnly"
+                                  (mapconcat #'identity sent "")))
+      (should-not (string-match-p "preview" (mapconcat #'identity sent ""))))))
 
 (ert-deftest doclive-test-route-request-uses-response-nonce-not-token ()
   "Preview responses should not reuse the bearer token as the CSP nonce."
@@ -1203,7 +1217,8 @@
               ((symbol-function 'delete-process)
                (lambda (_proc)
                  (setq deleted t))))
-      (doclive--route-request 'fake-proc "/preview?token=secret")
+      (doclive--route-request
+       'fake-proc "/preview" '(("cookie" . "doclive-token=secret")))
       (let ((response (mapconcat #'identity sent "")))
         (should deleted)
         (should (string-match-p "200 OK" response))
@@ -1350,7 +1365,8 @@
               ((symbol-function 'delete-process)
                (lambda (_proc)
                  (setq deleted t))))
-      (doclive--route-request 'fake-proc "/events?id=missing&token=secret")
+      (doclive--route-request
+       'fake-proc "/events?id=missing" '(("cookie" . "doclive-token=secret")))
       (should deleted)
       (should-not registered)
       (should (string-match-p "400 Bad Request" (mapconcat #'identity sent "")))
