@@ -488,6 +488,8 @@
   (dolist (url '("file:///tmp/marked.js"
                  "ftp://example.invalid/marked.js"
                  "//cdn.example.invalid/marked.js"
+                 "\\\\cdn.example.invalid\\marked.js"
+                 "/vendor\\marked.js"
                  "https://example.invalid/marked.js\nbad"))
     (should-not (doclive--safe-asset-url-p url)))
   (dolist (url '("https://example.invalid/marked.js"

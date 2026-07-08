@@ -200,6 +200,7 @@ they resolve under the current document's directory."
     (and (stringp url)
          (not (string-empty-p url))
          (not (string-match-p "[[:cntrl:][:space:]]" url))
+         (not (string-match-p "\\\\" url))
          (not (string-prefix-p "//" url))
          (or (string-match-p "\\`https?://" lower-url)
              (not (string-match-p "\\`[[:alpha:]][[:alnum:]+.-]*:" url))))))
