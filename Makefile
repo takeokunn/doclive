@@ -3,12 +3,12 @@ EMACS_BATCH = $(EMACS) -Q --batch -L . -L test
 
 SRC = doclive.el
 TEST = test/doclive-test-helpers.el test/doclive-test.el
+AUTOLOAD_SYMBOLS = doclive-start-server doclive-stop-server doclive-preview-mode doclive-preview-buffer doclive-preview-file doclive-reload-page
 
 .PHONY: check compile test lint package-lint autoloads security clean
 
 check: compile test lint package-lint autoloads security
 	git diff --check
-	git diff --exit-code -- doclive-autoloads.el
 
 compile:
 	$(EMACS_BATCH) --eval '(setq byte-compile-error-on-warn t)' -f batch-byte-compile $(SRC) $(TEST)
@@ -31,7 +31,15 @@ package-lint:
 	  --eval '(let ((issues (package-lint-buffer))) (if issues (progn (dolist (i issues) (princ (format "%s\n" i))) (kill-emacs 1)) (kill-emacs 0)))'
 
 autoloads:
-	$(EMACS_BATCH) --eval '(let ((output (expand-file-name "doclive-autoloads.el" default-directory))) (if (require (quote loaddefs-gen) nil t) (loaddefs-generate default-directory output) (require (quote autoload)) (let ((generated-autoload-file output)) (update-directory-autoloads default-directory))))'
+	@tmpdir=$$(mktemp -d "$${TMPDIR:-/tmp}/doclive-autoloads.XXXXXX"); \
+	trap 'rm -rf "$$tmpdir"' EXIT; \
+	cp $(SRC) "$$tmpdir/"; \
+	tmp="$$tmpdir/doclive-autoloads.el"; \
+	DOCLIVE_AUTOLOADS_DIR="$$tmpdir" DOCLIVE_AUTOLOADS_OUTPUT="$$tmp" $(EMACS_BATCH) --eval '(let ((dir (getenv "DOCLIVE_AUTOLOADS_DIR")) (output (getenv "DOCLIVE_AUTOLOADS_OUTPUT"))) (require (quote loaddefs-gen)) (loaddefs-generate dir output nil nil nil t))'; \
+	for symbol in $(AUTOLOAD_SYMBOLS); do \
+	  DOCLIVE_AUTOLOAD_SYMBOL="$$symbol" perl -0ne 'BEGIN { $$needle = "(autoload " . chr(39) . $$ENV{"DOCLIVE_AUTOLOAD_SYMBOL"} } { $$contents .= $$_ } END { exit(index($$contents, $$needle) >= 0 ? 0 : 1) }' "$$tmp" \
+	    || { echo "missing autoload for $$symbol" >&2; exit 1; }; \
+	done
 
 security:
 	gitleaks detect --no-git --source .
