@@ -1,0 +1,52 @@
+#+TITLE: MELPA Submission Notes
+
+* Recipe
+
+Use this recipe in the MELPA repository:
+
+#+begin_src emacs-lisp
+(doclive :fetcher github :repo "takeokunn/doclive")
+#+end_src
+
+* Maintainer Checklist
+
+- Confirm the package is released under GPL-3.0-or-later.
+- Confirm =doclive.el= has lexical binding, package metadata, commentary, and autoloads.
+- Run =make compile= and confirm byte-compilation has no warnings.
+- Run =make test= and confirm all ERT tests pass.
+- Run =make lint= and confirm checkdoc reports no issues.
+- Run =make package-lint= and confirm package-lint reports no issues.
+- Run =make autoloads= and confirm all interactive entry points generate autoloads.
+- Run =make security= and confirm secret scanning, actionlint, and zizmor pass.
+- Run =git diff --check= and confirm no whitespace errors.
+- Build and install the package following MELPA's current CONTRIBUTING instructions.
+
+* Manual Smoke Test
+
+Use the source checkout before opening the MELPA pull request:
+
+#+begin_src sh
+emacs -Q -L . -l doclive.el example/sample.md
+#+end_src
+
+Then run:
+
+#+begin_example
+M-x doclive-preview-buffer
+#+end_example
+
+Confirm:
+
+- preview opens in xwidget WebKit or external browser fallback
+- edits to the source buffer update the preview
+- local =.md= / =.org= links stay within the documented security boundary
+- =M-x doclive-stop-server= stops the local preview server
+
+* Submission Notes
+
+- The package has no runtime package dependencies beyond Emacs built-ins.
+- Browser-side libraries are loaded from exact-version CDN URLs by default.
+- The local preview server binds to =127.0.0.1= by default and protects preview
+  routes with a per-session bearer token.
+- Security-sensitive behavior is documented in =SECURITY.md= and user-visible
+  changes are summarized in =NEWS.org=.
