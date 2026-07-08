@@ -30,15 +30,23 @@ doclive starts a local HTTP server for preview rendering.  The default bind host
 is `127.0.0.1`, and preview routes require a per-session token.  Treat preview
 URLs as bearer secrets.  After the initial authorized page load, the browser
 runtime removes the token query parameter from the visible URL and history.
+The initial authorized `/preview` response sets a `doclive-token` cookie with
+`HttpOnly` and `SameSite=Strict`; subsequent `/content`, `/open`, and `/events`
+requests are authorized by that cookie instead of a query token.
+
+Binding to a non-loopback host requires changing `doclive-host` and explicitly
+setting `doclive-allow-non-loopback-host` to non-nil.
 
 The preview intentionally renders user-controlled Markdown and Org content in a
 browser context.  The implementation therefore relies on:
 
 - route-level token checks
 - loopback binding by default
+- explicit opt-in for non-loopback bind hosts
 - strict request parsing
 - Content-Security-Policy generated from configured browser asset origins
 - response-local CSP nonces that are separate from bearer tokens
+- HttpOnly preview-session cookies after the initial authorized load
 - pinned default browser assets
 - HTML sanitization before preview insertion
 - URL attribute allowlisting before preview insertion

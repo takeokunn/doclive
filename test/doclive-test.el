@@ -1048,29 +1048,33 @@
 
 (ert-deftest doclive-test-authorized-request-requires-current-token ()
   "Route authorization should require the current session token."
-  (let ((doclive--server-token "secret token"))
-    (should (doclive--authorized-request-p "/content?id=abc&token=secret+token"))
+  (let ((doclive--server-token "secret-token_1.2~3"))
+    (should (doclive--authorized-request-p "/content?id=abc&token=secret-token_1.2~3"))
     (should (doclive--authorized-request-p
-             "/content?id=abc" '(("cookie" . "doclive-token=secret token"))))
+             "/content?id=abc" '(("cookie" . "doclive-token=secret-token_1.2~3"))))
     (should (doclive--authorized-request-p
-             "/content?id=abc" '(("cookie" . "other=x; doclive-token=secret token"))))
+             "/content?id=abc" '(("cookie" . "other=x; doclive-token=secret-token_1.2~3"))))
     (should-not (doclive--authorized-request-p "/content?id=abc"))
     (should-not (doclive--authorized-request-p "/content?id=abc&token=wrong"))
     (should-not (doclive--authorized-request-p "/content?id=abc&token=%ZZ"))
-    (should-not (doclive--authorized-request-p "/content?id=abc&token=secret+token&x=%ZZ"))
-    (should-not (doclive--authorized-request-p "/content?id=abc&token=secret+token&token=secret+token"))
-    (should-not (doclive--authorized-request-p "/content?id=abc&token=secret+token&token=wrong"))
-    (should-not (doclive--authorized-request-p "/content?id=abc&token=%ZZ&token=secret+token"))
+    (should-not (doclive--authorized-request-p "/content?id=abc&token=secret-token_1.2~3&x=%ZZ"))
+    (should-not (doclive--authorized-request-p "/content?id=abc&token=secret-token_1.2~3&token=secret-token_1.2~3"))
+    (should-not (doclive--authorized-request-p "/content?id=abc&token=secret-token_1.2~3&token=wrong"))
+    (should-not (doclive--authorized-request-p "/content?id=abc&token=%ZZ&token=secret-token_1.2~3"))
     (should-not (doclive--authorized-request-p
                  "/content?id=abc" '(("cookie" . "doclive-token=wrong"))))
     (should-not (doclive--authorized-request-p
-                 "/content?id=abc&x=%ZZ" '(("cookie" . "doclive-token=secret token"))))
+                 "/content?id=abc" '(("cookie" . "doclive-token=secret token"))))
+    (should-not (doclive--authorized-request-p
+                 "/content?id=abc" '(("cookie" . "doclive-token=secret%20token"))))
+    (should-not (doclive--authorized-request-p
+                 "/content?id=abc&x=%ZZ" '(("cookie" . "doclive-token=secret-token_1.2~3"))))
     (should-not (doclive--authorized-request-p
                  "/content?id=abc&token=wrong&token=wrong"
-                 '(("cookie" . "doclive-token=secret token"))))
+                 '(("cookie" . "doclive-token=secret-token_1.2~3"))))
     (should-not (doclive--authorized-request-p
                  "/content?id=abc"
-                 '(("cookie" . "doclive-token=secret token; doclive-token=secret token"))))))
+                 '(("cookie" . "doclive-token=secret-token_1.2~3; doclive-token=secret-token_1.2~3"))))))
 
 (ert-deftest doclive-test-authorized-request-uses-secure-token-compare ()
   "Route authorization should use the hardened token comparison helper."

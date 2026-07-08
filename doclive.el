@@ -59,6 +59,7 @@
 ;; Customization options:
 ;;
 ;; - doclive-host :: bind host (default \"127.0.0.1\")
+;; - doclive-allow-non-loopback-host :: allow non-loopback bind hosts
 ;; - doclive-port :: bind port (default 39123)
 ;; - doclive-open-browser-function :: URL opening function (default
 ;;   xwidget-first, falls back to `browse-url')
@@ -886,20 +887,26 @@ runtime script and style when it is safe for CSP nonce use."
 
 (defun doclive--cookie-token (headers)
   "Return the doclive session token from HEADERS, or nil on ambiguity."
-  (let (found duplicate)
+  (let (found invalid-or-duplicate)
     (dolist (header (doclive--request-header-values headers "cookie")
-                    (and (not duplicate) found))
+                    (and (not invalid-or-duplicate) found))
       (dolist (cookie (split-string header ";" t))
         (let ((cookie (string-trim cookie)))
           (when (string-match "\\`doclive-token=\\([^;]*\\)\\'" cookie)
-            (if found
-                (setq duplicate t)
-              (setq found (match-string 1 cookie)))))))))
+            (let ((token (match-string 1 cookie)))
+              (if (or found
+                      (not (doclive--safe-cookie-token-p token)))
+                  (setq invalid-or-duplicate t)
+                (setq found token)))))))))
+
+(defun doclive--safe-cookie-token-p (token)
+  "Return non-nil when TOKEN is safe to use as a doclive cookie value."
+  (and (stringp token)
+       (string-match-p "\\`[A-Za-z0-9._~-]+\\'" token)))
 
 (defun doclive--session-cookie-header ()
   "Return a Set-Cookie header for the current server token."
-  (when (and (stringp doclive--server-token)
-             (string-match-p "\\`[A-Za-z0-9._~-]+\\'" doclive--server-token))
+  (when (doclive--safe-cookie-token-p doclive--server-token)
     (format "Set-Cookie: doclive-token=%s; Path=/; SameSite=Strict; HttpOnly\r\n"
             doclive--server-token)))
 

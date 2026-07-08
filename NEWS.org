@@ -20,6 +20,7 @@
   - Debounced snapshot updates (150 ms) for smooth editing without CPU spikes.
   - Token-protected local preview endpoints for preview, content, link opening, and SSE.
   - Preview pages remove bearer tokens from the visible browser URL after the initial authorized load.
+  - Subsequent preview API and SSE requests use an HttpOnly SameSite session cookie instead of query tokens.
   - Referrer suppression and nosniff headers on local HTTP responses.
   - Inline preview runtime scripts and styles use response-local CSP nonces separate from bearer tokens.
   - HTTP request parsing accepts only GET origin-form paths.
@@ -39,6 +40,8 @@
     before they reach the local preview server.
   - HTTP query parameters with malformed percent-encoding are rejected instead
     of being interpreted as raw route data.
+  - Malformed or duplicate preview-session cookies are rejected instead of being
+    accepted as route authorization material.
   - HTTP response bodies are emitted as UTF-8 bytes before computing Content-Length.
   - SSE broadcast drops failed clients while continuing delivery to healthy clients.
   - Empty SSE client sets are removed instead of leaving stale tracking entries.

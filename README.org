@@ -122,6 +122,7 @@ M-x doclive-reload-page
 
 doclive はローカルHTTPサーバーを起動し、既定では =127.0.0.1= に bind します。
 プレビューURLにはセッションごとの =token= が含まれ、=/preview= / =/content= / =/open= / =/events= は token が一致しないリクエストを拒否します。
+初回の認可済み =/preview= レスポンスは =HttpOnly= / =SameSite=Strict= の =doclive-token= Cookie を設定し、その後の =/content= / =/open= / =/events= は query token ではなく Cookie で認可します。
 初回読み込み後、preview runtime はブラウザの表示URLと履歴から =token= query parameter を削除します。
 サーバー停止時には token を破棄し、次回起動時に新しい token を生成します。
 また、バッファで =doclive-preview-mode= を無効化すると、そのバッファの preview entry、SSE client、更新 timer を削除し、以後は配信対象から外します。
@@ -130,7 +131,8 @@ preview HTML と HTTP response は =no-referrer= を設定し、token を含むU
 inline runtime script と style は bearer token とは別の response-local nonce で許可され、request-line は origin-form の絶対パスだけを受け付けます。
 
 非loopback hostに bind すると、同一ネットワーク上のブラウザからも到達可能になります。
-必要な場合だけ =doclive-host= を変更し、preview URL を信頼できる相手以外へ渡さないでください。
+必要な場合だけ =doclive-host= を変更し、=doclive-allow-non-loopback-host= を非nilにしてください。
+preview URL は信頼できる相手以外へ渡さないでください。
 
 ブラウザ資源は既定で pinned CDN URL を使います。
 =doclive-preview-asset-urls= は自前ミラーやローカル配信先に差し替えられますが、指定できるのは =https:= / =http:= の絶対URL、または同一オリジンの相対URLだけです。
