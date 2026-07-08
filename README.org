@@ -1,40 +1,61 @@
-#+TITLE: md-live
+#+TITLE: doclive
 
-[[https://github.com/takeokunn/md-live/actions/workflows/ci.yml][https://github.com/takeokunn/md-live/actions/workflows/ci.yml/badge.svg]]
+[[https://github.com/takeokunn/doclive/actions/workflows/ci.yml][https://github.com/takeokunn/doclive/actions/workflows/ci.yml/badge.svg]]
 
 * Overview
 
-md-live は、AI 生成 Markdown / Org を Emacs から高速に読むためのライブプレビュー用 Elisp パッケージです。
-WebSocket 前提を避け、SSE で更新を配信し、xwidget に依存せず外部ブラウザで安定表示します。
+doclive は、Markdown / Org を Emacs の xwidget WebKit で可視化するライブプレビュー用 Elisp パッケージです。
+SSE で更新を配信し、Emacs 内で扱いやすいようにリアルタイム同期します。
+AI が生成した Mermaid 図や LaTeX 数式（equation, align, gather, cases など）を網羅的に可視化できます。
 
 * Features
 
-- SSE によるライブ更新
-- xwidget 非依存（外部ブラウザ表示）
+- SSE によるライブ更新（150ms デバウンス付き）
+- xwidget WebKit による Emacs 内プレビュー（未対応 Emacs では外部ブラウザへフォールバック）
 - Markdown と Org のプレビュー表示
-- Mermaid / KaTeX / Highlight.js
+- Mermaid 図（バッククォート・チルダフェンス、mmd エイリアス対応）
+- KaTeX 数式（equation, align, gather, cases など LaTeX 環境を網羅的にサポート）
+- Highlight.js によるシンタックスハイライト
 - Markdown / Org のローカル相対リンク遷移 + 戻る/進む
 - TOC サイドバー
 - コードコピー
 - 検索 + ピン留めハイライト
-- テーマ切替（Dark / Light）
+- テーマ切替（Dark / Light）+ コネクション状態表示
 - ズーム
+- バッファ削除時の自動クリーンアップ
+- Emacs 終了時のサーバー自動停止
 
 * Installation
+
+** MELPA
+
+#+begin_src emacs-lisp
+(require 'package)
+(add-to-list 'package-archives '("melpa" . "https://melpa.org/packages/") t)
+(package-initialize)
+(package-refresh-contents)
+(package-install 'doclive)
+#+end_src
 
 ** use-package
 
 #+begin_src emacs-lisp
-(use-package md-live
-  :load-path "/path/to/md-live"
-  :commands (md-live-preview-buffer md-live-preview-file md-live-stop-server))
+(use-package doclive
+  :commands (doclive-preview-buffer doclive-preview-file doclive-stop-server doclive-reload-page))
 #+end_src
 
 ** Manual
 
 #+begin_src emacs-lisp
-(add-to-list 'load-path "/path/to/md-live")
-(require 'md-live)
+(add-to-list 'load-path "/path/to/doclive")
+(require 'doclive)
+#+end_src
+
+** From source checkout
+
+#+begin_src emacs-lisp
+(add-to-list 'load-path "/path/to/doclive")
+(require 'doclive)
 #+end_src
 
 * Usage
@@ -43,22 +64,26 @@ WebSocket 前提を避け、SSE で更新を配信し、xwidget に依存せず�
 
 Markdown または Org バッファで次を実行します。
 
-#+begin_src emacs-lisp
-M-x md-live-preview-buffer
-#+end_src
+#+begin_example
+M-x doclive-preview-buffer
+#+end_example
+
+=C-u M-x doclive-preview-buffer= でサーバーを再起動してからプレビューを開きます。
 
 ** ファイル指定でプレビュー
 
 =.md= / =.org= ファイルを指定してプレビューできます。
 
-#+begin_src emacs-lisp
-M-x md-live-preview-file
-#+end_src
+#+begin_example
+M-x doclive-preview-file
+#+end_example
 
 ** ローカルリンク遷移
 
-プレビュー内の =.md= / =.org= への相対リンクをクリックすると、同じ md-live 画面内でリンク先を開きます。
+プレビュー内の =.md= / =.org= への相対リンクをクリックすると、同じ doclive 画面内でリンク先を開きます。
 fragment や query はファイル解決時には無視され、remote URL や未対応拡張子は開きません。
+既定では、リンク先はクリック元ファイルのディレクトリ配下に限定されます。
+=../notes.md= のように親ディレクトリへ出るリンクを許可したい場合は、信頼できる文書だけで =doclive-allow-linked-document-parent-directory= を有効にしてください。
 
 #+begin_src org
 [[file:example/sample.md][Markdown sample]]
@@ -67,19 +92,53 @@ fragment や query はファイル解決時には無視され、remote URL や�
 
 ** サーバー停止
 
-#+begin_src emacs-lisp
-M-x md-live-stop-server
-#+end_src
+#+begin_example
+M-x doclive-stop-server
+#+end_example
+
+** プレビュー再読み込み
+
+現在のバッファの最新スナップショットを強制的にプッシュします。
+
+#+begin_example
+M-x doclive-reload-page
+#+end_example
 
 * Customization
 
-- =md-live-host= : bind host
-- =md-live-port= : bind port
-- =md-live-open-browser-function= : URL オープン関数
+- =doclive-host= : bind host
+- =doclive-port= : bind port
+- =doclive-open-browser-function= : URL オープン関数（既定は xwidget 優先）
+- =doclive-change-debounce-ms= : 変更検知のデバウンス間隔（ms、既定 150）
+- =doclive-preview-asset-urls= : ブラウザ側で読む marked.js / KaTeX / Mermaid / highlight.js の資源 URL
+- =doclive-allow-linked-document-parent-directory= : ローカルリンク遷移でクリック元ディレクトリ外の Markdown / Org を開くかどうか（既定 nil）
+
+* Security model
+
+doclive はローカルHTTPサーバーを起動し、既定では =127.0.0.1= に bind します。
+プレビューURLにはセッションごとの =token= が含まれ、=/preview= / =/content= / =/open= / =/events= は token が一致しないリクエストを拒否します。
+このURLは bearer secret として扱い、共有・ログ貼り付け・公開スクリーンショットへの写り込みを避けてください。
+preview HTML と HTTP response は =no-referrer= を設定し、token を含むURLが外部CDNへの Referer として送られないようにします。
+
+非loopback hostに bind すると、同一ネットワーク上のブラウザからも到達可能になります。
+必要な場合だけ =doclive-host= を変更し、preview URL を信頼できる相手以外へ渡さないでください。
+
+ブラウザ資源は既定で pinned CDN URL を使います。
+=doclive-preview-asset-urls= は自前ミラーやローカル配信先に差し替えられますが、指定できるのは =https:= / =http:= の絶対URL、または同一オリジンの相対URLだけです。
+=file:= / =ftp:= / =javascript:= / =vbscript:= / =data:= / =//= から始まる protocol-relative URL は拒否され、Content-Security-Policy は設定された資源URLの origin から生成されます。
+
+ローカルリンク遷移は既定でクリック元ファイルのディレクトリ配下に限定されます。
+これにより、外部から受け取った文書内の =../secret.md= のようなリンクを誤クリックして、意図しないローカル Markdown / Org をプレビューへ読み込むリスクを下げます。
 
 * Development
 
 基本ゲートは Makefile から実行します。
+
+#+begin_src sh
+make check
+#+end_src
+
+=make check= は以下をまとめて実行します。
 
 #+begin_src sh
 make compile
@@ -95,20 +154,21 @@ Nix を使う場合は、同じ品質ゲートを flake 経由で確認できま
 nix flake check
 #+end_src
 
-ブラウザ smoke では =example/sample.md= と =example/sample.org= を使います。
+プレビュー smoke では =example/sample.md= と =example/sample.org= を使います。
 agent 実行では Playwright で DOM assertion と screenshot / console log を保存し、人間の目視だけを成功条件にしません。
 
 #+begin_src sh
-emacs -Q -L . -l md-live.el \
-  --eval '(setq md-live-open-browser-function (lambda (url) (princ (concat url "\n"))))' \
-  --eval '(md-live-preview-file (expand-file-name "example/sample.md" default-directory))' \
+emacs -Q -L . -l doclive.el \
+  --eval '(setq doclive-open-browser-function (lambda (url) (princ (concat url "\n"))))' \
+  --eval '(doclive-preview-file (expand-file-name "example/sample.md" default-directory))' \
   --eval '(while t (accept-process-output nil 1))'
 #+end_src
 
 * Troubleshooting
 
-- Mermaid / KaTeX / Highlight.js はブラウザ側で CDN から読み込みます。描画されない場合はブラウザ console と network log を確認してください。
-- port conflict がある場合は =md-live-port= を別の値に変更してください。
+- Mermaid / KaTeX / Highlight.js はブラウザ側で外部資源を読み込みます。描画されない場合はブラウザ console と network log を確認してください。
+- ネットワーク制約がある環境では =doclive-preview-asset-urls= を自前のミラーやローカル配信先に差し替えてください。
+- port conflict がある場合は =doclive-port= を別の値に変更してください。
 - Org preview は Emacs built-in の =org= / =ox-html= で HTML fragment に export します。preview 中に Babel source block は実行しません。
 - remote URL、=.el=、=.html=、=.pdf= などはローカルリンク遷移の対象外です。
 
@@ -122,7 +182,6 @@ MVP 内:
 
 MVP 外:
 
-- xwidget 依存
 - WebSocket 化
 - remote file fetch
 - Org Babel 実行

@@ -1,0 +1,30 @@
+#+TITLE: doclive NEWS - user-visible changes
+
+* 0.1.0 (unreleased)
+
+  Initial release.
+
+  - Live preview of Markdown and Org documents via embedded HTTP server with SSE.
+  - In-buffer preview using xwidget WebKit; falls back to external browser when xwidget is unavailable.
+  - Markdown rendering via marked.js with syntax highlighting (highlight.js).
+  - Org rendering via Emacs built-in ~org~ and ~ox-html~ (no Babel execution during preview).
+  - Mermaid diagram rendering (backtick and tilde fences, ~mmd~ alias).
+  - Comprehensive KaTeX math typesetting with LaTeX environment support
+    (~equation~, ~align~, ~gather~, ~cases~, ~Bmatrix~, ~vmatrix~, and more).
+  - TOC sidebar for document outline.
+  - Code block copy buttons.
+  - Full-text search with pin-based result highlighting.
+  - Dark and Light theme toggle.
+  - Zoom in/out controls.
+  - Local relative link navigation between =.md= and =.org= files, with back/forward support.
+  - Debounced snapshot updates (150 ms) for smooth editing without CPU spikes.
+  - Token-protected local preview endpoints for preview, content, link opening, and SSE.
+  - Referrer suppression and nosniff headers on local HTTP responses.
+  - SSE responses also send no-referrer, nosniff, and no-store cache headers.
+  - Local linked document navigation stays under the source file directory by default.
+  - Validation for host, port, debounce delay, and customized browser asset URLs.
+  - Browser asset URLs are escaped before HTML embedding and active-content schemes are rejected.
+  - Session lifecycle management: buffer-kill cleanup, Emacs shutdown hook.
+  - Customizable host, port, browser-open function, and debounce delay.
+  - Interactive commands: ~doclive-preview-buffer~ (C-u to restart server),
+    ~doclive-preview-file~, ~doclive-stop-server~, ~doclive-reload-page~.

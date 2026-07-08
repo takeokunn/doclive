@@ -1,6 +1,6 @@
-# md-live Markdown sample
+# doclive Markdown sample
 
-This sample file is used for md-live browser QA.
+This sample file is used for doclive preview QA.
 
 - It contains a Mermaid fence.
 - It contains inline math: $a^2 + b^2 = c^2$.

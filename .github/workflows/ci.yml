@@ -1,56 +1,30 @@
 name: CI
 
 on:
+  pull_request:
   push:
     branches:
       - main
-  pull_request:
 
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
-
 jobs:
-  quality:
+  check:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        emacs_version:
-          - 28.1
-          - 29.1
-          - snapshot
+    timeout-minutes: 20
+
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Emacs
-        uses: purcell/setup-emacs@v8.5
+      - name: Checkout
+        uses: actions/checkout@v5
         with:
-          version: ${{ matrix.emacs_version }}
+          persist-credentials: false
 
-      - name: Install package-lint
-        run: |
-          emacs -Q --batch \
-            --eval "(require 'package)" \
-            --eval "(setq package-archives '((\"gnu\" . \"https://elpa.gnu.org/packages/\") (\"melpa\" . \"https://melpa.org/packages/\")))" \
-            --eval "(package-initialize)" \
-            --eval "(unless package-archive-contents (package-refresh-contents))" \
-            --eval "(unless (package-installed-p 'package-lint) (package-install 'package-lint))"
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
 
-      - name: Compile
-        run: make compile
-
-      - name: Test
-        run: make test
-
-      - name: Lint
-        run: make lint
-
-      - name: Package lint
-        run: make package-lint
-
-      - name: Autoloads
-        run: make autoloads
+      - name: Run release gate
+        run: nix develop --command make check
