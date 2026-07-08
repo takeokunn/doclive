@@ -389,7 +389,18 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
   "Return non-nil when HOST is usable in the local preview URL."
   (and (stringp host)
        (not (string-empty-p host))
-       (not (string-match-p "[[:cntrl:][:space:]/?#:]" host))))
+       (not (string-match-p "[[:cntrl:][:space:]/?#]" host))
+       (or (not (string-match-p ":" host))
+           (string-match-p "\\`\\[[0-9A-Fa-f:.]+\\]\\'" host)
+           (string-match-p "\\`[0-9A-Fa-f:.]+\\'" host))))
+
+(defun doclive--url-host (host)
+  "Return HOST formatted for use as a URL host component."
+  (if (and (stringp host)
+           (string-match-p ":" host)
+           (not (string-prefix-p "[" host)))
+      (concat "[" host "]")
+    host))
 
 (defun doclive--loopback-host-p (host)
   "Return non-nil when HOST names a loopback interface."
@@ -1277,7 +1288,9 @@ runtime script and style when it is safe for CSP nonce use."
            :coding 'utf-8-unix
            :noquery t))
     (add-hook 'kill-emacs-hook #'doclive--kill-emacs-cleanup)
-    (message "doclive server started: http://%s:%d" doclive-host doclive-port)))
+    (message "doclive server started: http://%s:%d"
+             (doclive--url-host doclive-host)
+             doclive-port)))
 
 ;;;###autoload
 (defun doclive-stop-server ()
@@ -1303,7 +1316,7 @@ runtime script and style when it is safe for CSP nonce use."
   (let ((id (doclive--buffer-id buffer)))
     (doclive--ensure-server-token)
     (format "http://%s:%d/preview?id=%s&bootstrap=%s"
-            doclive-host
+            (doclive--url-host doclive-host)
             doclive-port
             (url-hexify-string id)
             (url-hexify-string (doclive--create-bootstrap-code id)))))

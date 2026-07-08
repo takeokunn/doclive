@@ -1112,6 +1112,37 @@
         (doclive--server nil))
     (should-error (doclive-start-server) :type 'user-error)))
 
+(ert-deftest doclive-test-server-host-validation-allows-ipv6-loopback ()
+  "Server option validation should allow IPv6 loopback host syntax."
+  (let ((doclive-host "::1")
+        (doclive-port 39123)
+        (doclive--server nil)
+        (doclive-allow-non-loopback-host nil))
+    (should-not (doclive--validate-server-options)))
+  (let ((doclive-host "[::1]")
+        (doclive-port 39123)
+        (doclive--server nil)
+        (doclive-allow-non-loopback-host nil))
+    (should-not (doclive--validate-server-options)))
+  (let ((doclive-host "example:invalid")
+        (doclive-port 39123)
+        (doclive--server nil)
+        (doclive-allow-non-loopback-host t))
+    (should-error (doclive--validate-server-options) :type 'user-error)))
+
+(ert-deftest doclive-test-preview-url-brackets-raw-ipv6-host ()
+  "Preview URLs should bracket raw IPv6 hosts."
+  (let ((doclive-host "::1")
+        (doclive-port 39123)
+        (doclive--server-token "token"))
+    (clrhash doclive--bootstrap-codes)
+    (cl-letf (((symbol-function 'doclive--random-token)
+               (lambda () "bootstrap")))
+      (with-temp-buffer
+        (should (string-prefix-p
+                 "http://[::1]:39123/preview?id="
+                 (doclive--preview-url (current-buffer))))))))
+
 (ert-deftest doclive-test-start-server-requires-opt-in-for-non-loopback-host ()
   "Server startup should not expose previews beyond loopback by default."
   (let ((doclive-host "0.0.0.0")
