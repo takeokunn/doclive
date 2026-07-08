@@ -29,7 +29,8 @@
   - Validation for host, port, debounce delay, and customized browser asset URLs.
   - Browser asset URLs are escaped before HTML embedding; malformed authorities,
     userinfo, non-numeric ports, and active-content schemes are rejected.
-  - Rendered document URL attributes are allowlisted before DOM insertion.
+  - Rendered document URL attributes are allowlisted before DOM insertion; form
+    actions, media posters, and unparsed srcset lists are covered.
   - Session lifecycle management: buffer-kill cleanup, preview-mode disable cleanup, server-stop token invalidation, Emacs shutdown hook.
   - Release gate includes byte-compilation, ERT tests, checkdoc, package-lint, autoload generation, whitespace checks, secret scanning, and GitHub Actions security checks.
   - Customizable host, port, browser-open function, and debounce delay.

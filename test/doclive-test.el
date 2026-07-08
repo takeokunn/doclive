@@ -578,7 +578,8 @@
     (should (string-match-p (regexp-quote "/^[a-z][a-z0-9+.-]*:/") html))
     (should (string-match-p (regexp-quote "/^(https?:|mailto:)/") html))
     (should (string-match-p "xlink:href" html))
-    (should (string-match-p (regexp-quote "name.toLowerCase()==='style'") html))
+    (should (string-match-p (regexp-quote "lower==='style'") html))
+    (should (string-match-p (regexp-quote "lower==='srcset'") html))
     (should (string-match-p (regexp-quote "el.setAttribute('rel','noopener noreferrer')") html))
     (should (string-match-p (regexp-quote "return '&#39;'") html))
     (should-not (string-match-p (regexp-quote ",:'&#39;'") html))))
@@ -594,6 +595,9 @@
              (regexp-quote "if(/[\\u0000-\\u001F\\u007F]/.test(raw)) return '';")
              html))
     (should (string-match-p (regexp-quote "return raw.trim();") html))
+    (should (string-match-p
+             (regexp-quote "/^(href|src|xlink:href|formaction|action|poster)$/i")
+             html))
     (should (string-match-p
              (regexp-quote
               "if(/^[a-z][a-z0-9+.-]*:/.test(folded)&&!/^(https?:|mailto:)/.test(folded)) return '';")
