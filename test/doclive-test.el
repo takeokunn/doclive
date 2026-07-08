@@ -577,6 +577,20 @@
     (should (string-match-p (regexp-quote "return '&#39;'") html))
     (should-not (string-match-p (regexp-quote ",:'&#39;'") html))))
 
+(ert-deftest doclive-test-preview-html-includes-csp-nonce ()
+  "Preview HTML should nonce the inline runtime script."
+  (let* ((doclive--server-token "abc123_-")
+         (html (doclive--preview-html)))
+    (should (string-match-p (regexp-quote "<script nonce='abc123_-'>") html))
+    (should-not (string-match-p (regexp-quote "<script>") html))))
+
+(ert-deftest doclive-test-preview-html-omits-unsafe-nonce ()
+  "Preview HTML should not embed tokens unsafe for CSP header use."
+  (let* ((doclive--server-token "bad token\r\n")
+         (html (doclive--preview-html)))
+    (should (string-match-p (regexp-quote "<script>") html))
+    (should-not (string-match-p (regexp-quote "bad token") html))))
+
 (ert-deftest doclive-test-preview-html-normalizes-theme-value ()
   "Theme selection should reject persisted values outside the supported set."
   (let ((html (doclive--preview-html)))
@@ -843,7 +857,8 @@
            (highlight-script . "https://assets.example.invalid/highlight.js")
            (katex-script . "/vendor/katex.js")
            (katex-auto-render-script . "/vendor/auto-render.js")
-           (mermaid-script . "https://diagrams.example.invalid/mermaid.js"))))
+           (mermaid-script . "https://diagrams.example.invalid/mermaid.js")))
+        (doclive--server-token "abc123_-"))
     (let ((response (doclive--http-response "200 OK" "text/plain" "body")))
       (should (string-match-p
                (regexp-quote "https://assets.example.invalid")
@@ -855,8 +870,9 @@
                (regexp-quote "https://diagrams.example.invalid")
                response))
       (should (string-match-p
-               "script-src .*'self'.*http://127\\.0\\.0\\.1:8000.*https://diagrams\\.example\\.invalid.*'unsafe-inline'"
+               "script-src .*'self'.*http://127\\.0\\.0\\.1:8000.*https://diagrams\\.example\\.invalid.*'nonce-abc123_-'"
                response))
+      (should-not (string-match-p "script-src .*'unsafe-inline'" response))
       (should (string-match-p "connect-src 'self'\r\n" response)))))
 
 (ert-deftest doclive-test-sse-handshake-sets-security-headers ()

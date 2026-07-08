@@ -194,6 +194,12 @@ they resolve under the current document's directory."
   "Escape STR for safe quoted HTML attribute embedding."
   (replace-regexp-in-string "'" "&#39;" (doclive--escape-html str) t t))
 
+(defun doclive--browser-script-nonce ()
+  "Return the current server token when safe to use as a CSP nonce."
+  (when (and (stringp doclive--server-token)
+             (string-match-p "\\`[[:alnum:]+/_-]+\\'" doclive--server-token))
+    doclive--server-token))
+
 (defun doclive--safe-asset-url-p (url)
   "Return non-nil when URL is safe to embed as a browser asset URL."
   (let ((lower-url (and (stringp url) (downcase url))))
@@ -241,7 +247,9 @@ they resolve under the current document's directory."
       "img-src 'self' data: blob:"
       (concat "font-src " asset-sources " data:")
       (concat "style-src " asset-sources " 'unsafe-inline'")
-      (concat "script-src " asset-sources " 'unsafe-inline'")
+      (concat "script-src " asset-sources
+              (let ((nonce (doclive--browser-script-nonce)))
+                (if nonce (format " 'nonce-%s'" nonce) "")))
       "connect-src 'self'")
      "; ")))
 
@@ -631,7 +639,10 @@ SSE client for live-update support."
    "<script src='" (doclive--preview-asset-url 'katex-script) "'></script>"
    "<script src='" (doclive--preview-asset-url 'katex-auto-render-script) "'></script>"
    "<script src='" (doclive--preview-asset-url 'mermaid-script) "'></script>"
-   "<script>"
+   "<script"
+   (let ((nonce (doclive--browser-script-nonce)))
+     (if nonce (concat " nonce='" (doclive--escape-html-attribute nonce) "'") ""))
+   ">"
    "const qs=new URLSearchParams(location.search); let currentId=qs.get('id'); const currentToken=qs.get('token')||'';"
    "const statusEl=document.getElementById('status'); const mdEl=document.getElementById('md'); const tocEl=document.getElementById('toc');"
    "const searchEl=document.getElementById('search'); const pinEl=document.getElementById('pin'); const chipsEl=document.getElementById('chips');"
