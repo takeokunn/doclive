@@ -41,6 +41,7 @@ browser context.  The implementation therefore relies on:
 - response-local CSP nonces that are separate from bearer tokens
 - pinned default browser assets
 - HTML sanitization before preview insertion
+- URL attribute allowlisting before preview insertion
 - local linked-document confinement under the source directory by default
 - disabled local-variable evaluation for linked documents
 - token invalidation when the preview server stops
@@ -48,6 +49,11 @@ browser context.  The implementation therefore relies on:
   is disabled for a buffer
 
 Reports that bypass or weaken these boundaries are security bugs.
+
+Rendered document URL attributes are kept only for relative links, anchors, and
+explicit `http:`, `https:`, or `mailto:` URLs.  Unsupported schemes,
+protocol-relative URLs, backslashes, and control/space-folded forms are removed
+before DOM insertion.
 
 ## Disclosure
 
