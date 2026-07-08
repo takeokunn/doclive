@@ -419,12 +419,18 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
 (defun doclive--broadcast-revision (id revision)
   "Push REVISION event to all SSE clients of ID."
   (let ((clients (doclive--sse-clients-for id))
-        (msg (format "event: revision\ndata: {\"revision\":%d}\n\n" revision)))
+        (msg (format "event: revision\ndata: {\"revision\":%d}\n\n" revision))
+        alive)
     (dolist (client clients)
-      (condition-case _
-          (process-send-string client msg)
-        (error nil)))
-    (doclive--set-sse-clients-for id clients)))
+      (when (process-live-p client)
+        (condition-case _
+            (progn
+              (process-send-string client msg)
+              (push client alive))
+          (error
+           (ignore-errors
+             (delete-process client))))))
+    (doclive--set-sse-clients-for id (nreverse alive))))
 
 (defun doclive--org-buffer-p (buffer)
   "Return non-nil when BUFFER should be exported as Org."

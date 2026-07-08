@@ -1174,6 +1174,30 @@
       (should (string-match-p "400 Bad Request" (mapconcat #'identity sent "")))
       (should (string-match-p "Missing or unknown buffer id" (mapconcat #'identity sent ""))))))
 
+(ert-deftest doclive-test-broadcast-revision-prunes-failed-sse-clients ()
+  "Broadcasting should drop clients that fail writes without aborting."
+  (let ((doclive--sse-clients (make-hash-table :test #'equal))
+        (sent nil)
+        (deleted nil))
+    (puthash "buffer-id" '(failing-client healthy-client) doclive--sse-clients)
+    (cl-letf (((symbol-function 'process-live-p)
+               (lambda (proc)
+                 (memq proc '(failing-client healthy-client))))
+              ((symbol-function 'process-send-string)
+               (lambda (proc string)
+                 (if (eq proc 'failing-client)
+                     (error "simulated SSE write failure")
+                   (push (cons proc string) sent))))
+              ((symbol-function 'delete-process)
+               (lambda (proc)
+                 (push proc deleted))))
+      (doclive--broadcast-revision "buffer-id" 42)
+      (should (equal sent
+                     '((healthy-client . "event: revision\ndata: {\"revision\":42}\n\n"))))
+      (should (equal deleted '(failing-client)))
+      (should (equal (gethash "buffer-id" doclive--sse-clients)
+                     '(healthy-client))))))
+
 (ert-deftest doclive-test-cleanup-stale-entries-removes-dead-buffers ()
   "Stale buffer entries should be pruned on demand."
   (let* ((buf (generate-new-buffer " *doclive-stale*"))
