@@ -800,6 +800,7 @@
   (should-not (doclive--query-param "/content?id=%ZZ" "id"))
   (should-not (doclive--query-param "/content?%ZZ=value&id=abc" "id"))
   (should-not (doclive--query-param "/content?%ZZ&id=abc" "id"))
+  (should-not (doclive--query-param "/content?token=secret&x=%ZZ" "token"))
   (should-not (doclive--query-param "/content?token=%ZZ&token=secret" "token")))
 
 (ert-deftest doclive-test-random-token-uses-openssl-rand ()
@@ -1015,6 +1016,7 @@
     (should-not (doclive--authorized-request-p "/content?id=abc"))
     (should-not (doclive--authorized-request-p "/content?id=abc&token=wrong"))
     (should-not (doclive--authorized-request-p "/content?id=abc&token=%ZZ"))
+    (should-not (doclive--authorized-request-p "/content?id=abc&token=secret+token&x=%ZZ"))
     (should-not (doclive--authorized-request-p "/content?id=abc&token=%ZZ&token=secret+token"))))
 
 (ert-deftest doclive-test-authorized-request-uses-secure-token-compare ()

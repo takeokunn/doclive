@@ -793,25 +793,20 @@ runtime script and style when it is safe for CSP nonce use."
   (when (and path (string-match "\\?" path))
     (let ((pairs (split-string (substring path (1+ (match-beginning 0))) "&" t))
           found
-          done
           invalid)
       (dolist (p pairs (and (not invalid) found))
         (if (not (string-match "=" p))
             (unless (doclive--decode-query-component p)
-              (setq invalid t
-                    done t))
-          (when (not done)
-            (let* ((eq (match-beginning 0))
-                   (raw-key (substring p 0 eq))
-                   (raw-value (substring p (1+ eq)))
-                   (decoded-key (doclive--decode-query-component raw-key))
-                   (decoded-value (doclive--decode-query-component raw-value)))
-              (if (or (null decoded-key) (null decoded-value))
-                  (setq invalid t
-                        done t)
-                (when (string= decoded-key key)
-                  (setq found decoded-value
-                        done t))))))))))
+              (setq invalid t))
+          (let* ((eq (match-beginning 0))
+                 (raw-key (substring p 0 eq))
+                 (raw-value (substring p (1+ eq)))
+                 (decoded-key (doclive--decode-query-component raw-key))
+                 (decoded-value (doclive--decode-query-component raw-value)))
+            (if (or (null decoded-key) (null decoded-value))
+                (setq invalid t)
+              (when (and (null found) (string= decoded-key key))
+                (setq found decoded-value)))))))))
 
 (defun doclive--sse-handshake ()
   "Return SSE headers."
