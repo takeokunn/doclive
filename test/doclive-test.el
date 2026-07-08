@@ -19,7 +19,8 @@
 (require 'cl-lib)
 (require 'ert)
 (require 'doclive)
-(require 'doclive-test-helpers)
+(eval-and-compile
+  (load "doclive-test-helpers" nil t))
 
 (defun doclive-test--markdown-snapshot-object ()
   "Return a JSON plist for a sample Markdown snapshot."
@@ -132,6 +133,14 @@
     (should (stringp docstring))
     (should (> (length (split-string docstring "\n" t)) 1))
     (should (string-match-p "preview" docstring))))
+
+(ert-deftest doclive-test-test-files-do-not-provide-features ()
+  "Test files should not provide package features for MELPA builds."
+  (dolist (file '("test/doclive-test.el" "test/doclive-test-helpers.el"))
+    (should-not
+     (string-match-p
+      "^(provide[[:space:]\n]+"
+      (doclive-test--file-string file)))))
 
 ;; Buffer identity / state
 

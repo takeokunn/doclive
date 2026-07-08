@@ -44,6 +44,4 @@ FILES is an alist of relative file names to contents."
   "Parse JSON string to plist."
   (json-parse-string json :object-type 'plist))
 
-(provide 'doclive-test-helpers)
-
 ;;; doclive-test-helpers.el ends here
