@@ -127,7 +127,7 @@ doclive はローカルHTTPサーバーを起動し、既定では =127.0.0.1= �
 また、バッファで =doclive-preview-mode= を無効化すると、そのバッファの preview entry、SSE client、更新 timer を削除し、以後は配信対象から外します。
 このURLは bearer secret として扱い、共有・ログ貼り付け・公開スクリーンショットへの写り込みを避けてください。
 preview HTML と HTTP response は =no-referrer= を設定し、token を含むURLが外部CDNへの Referer として送られないようにします。
-inline runtime script は bearer token とは別の response-local nonce で許可され、request-line は origin-form の絶対パスだけを受け付けます。
+inline runtime script と style は bearer token とは別の response-local nonce で許可され、request-line は origin-form の絶対パスだけを受け付けます。
 
 非loopback hostに bind すると、同一ネットワーク上のブラウザからも到達可能になります。
 必要な場合だけ =doclive-host= を変更し、preview URL を信頼できる相手以外へ渡さないでください。

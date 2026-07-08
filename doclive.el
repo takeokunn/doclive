@@ -619,8 +619,8 @@ SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
 The page embeds marked.js for Markdown rendering, highlight.js for
 syntax highlighting, KaTeX for math typesetting with comprehensive
 LaTeX environment support, Mermaid.js for diagram rendering, and an
-SSE client for live-update support.  SCRIPT-NONCE is applied to the
-inline runtime script when it is safe for CSP nonce use."
+SSE client for live-update support.  SCRIPT-NONCE is applied to inline
+runtime script and style when it is safe for CSP nonce use."
   (concat
    "<!doctype html><html><head><meta charset='utf-8'>"
    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
