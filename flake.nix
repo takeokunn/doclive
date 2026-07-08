@@ -2,7 +2,7 @@
   description = "doclive - Fast Markdown and Org preview for AI docs";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
   };
 
   outputs =

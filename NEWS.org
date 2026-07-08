@@ -1,6 +1,6 @@
 #+TITLE: doclive NEWS - user-visible changes
 
-* 0.1.0 (unreleased)
+* 0.1.1 (unreleased)
 
   Initial release.
 
