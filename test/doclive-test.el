@@ -62,6 +62,9 @@
 (ert-deftest doclive-test-package-headers-use-specific-maintainers ()
   "Package headers should not use generic contributor placeholders."
   (let ((source (doclive-test--doclive-source)))
+    (should (string-match-p (regexp-quote ";; Author: takeokunn") source))
+    (should (string-match-p (regexp-quote ";; Assisted-by: OpenAI Codex: GPT-5") source))
+    (should (string-match-p (regexp-quote ";; Maintainer: takeokunn") source))
     (should-not (string-match-p (regexp-quote ";; Author: doclive contributors") source))
     (should-not (string-match-p (regexp-quote ";; Maintainer: doclive contributors") source))))
 

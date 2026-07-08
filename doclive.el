@@ -3,6 +3,7 @@
 ;; Copyright (C) 2026 takeokunn
 ;;
 ;; Author: takeokunn
+;; Assisted-by: OpenAI Codex: GPT-5
 ;; Maintainer: takeokunn
 ;; URL: https://github.com/takeokunn/doclive
 ;; Version: 0.1.0
