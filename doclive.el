@@ -1058,10 +1058,10 @@ Return :invalid when REQUEST contains malformed or folded headers."
   "Return non-nil when Host header VALUE is acceptable for this server."
   (let ((parsed (doclive--parse-host-header-value value)))
     (and parsed
+         (or (null (cadr parsed))
+             (= (cadr parsed) doclive-port))
          (or (not (doclive--loopback-host-p doclive-host))
-             (and (doclive--host-header-host-matches-p (car parsed))
-                  (or (null (cadr parsed))
-                      (= (cadr parsed) doclive-port)))))))
+             (doclive--host-header-host-matches-p (car parsed))))))
 
 (defun doclive--valid-host-header-p (request-line headers)
   "Return non-nil when HEADERS are valid for REQUEST-LINE Host handling."
@@ -1122,13 +1122,15 @@ Return :invalid when REQUEST contains malformed or folded headers."
   (and (doclive--valid-query-p path)
        (let* ((id (doclive--query-param path "id"))
               (code (doclive--query-param path "bootstrap"))
-              (entry (and code (gethash code doclive--bootstrap-codes))))
+              (entry (and code (gethash code doclive--bootstrap-codes)))
+              (entry-id (and (listp entry) (plist-get entry :id)))
+              (expires (and (listp entry) (plist-get entry :expires))))
          (and (stringp id)
               (doclive--safe-cookie-token-p code)
-              (listp entry)
-              (numberp (plist-get entry :expires))
-              (string= id (plist-get entry :id))
-              (<= (float-time) (plist-get entry :expires))
+              (stringp entry-id)
+              (numberp expires)
+              (string= id entry-id)
+              (<= (float-time) expires)
               (progn
                 (remhash code doclive--bootstrap-codes)
                 t)))))

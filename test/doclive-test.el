@@ -1478,6 +1478,12 @@
     (should (doclive--valid-host-header-p
              "GET / HTTP/1.1"
              '(("host" . "docs.example.invalid:39123"))))
+    (should (doclive--valid-host-header-p
+             "GET / HTTP/1.1"
+             '(("host" . "docs.example.invalid"))))
+    (should-not (doclive--valid-host-header-p
+                 "GET / HTTP/1.1"
+                 '(("host" . "docs.example.invalid:39124"))))
     (should-not (doclive--valid-host-header-p
                  "GET / HTTP/1.1"
                  '(("host" . "docs.example.invalid:bad")))))
@@ -1797,6 +1803,27 @@
         (should deleted)
         (should (string-match-p "403 Forbidden" response))
         (should (gethash "malformed-code" doclive--bootstrap-codes))))))
+
+(ert-deftest doclive-test-route-request-rejects-malformed-bootstrap-id ()
+  "Bootstrap entries with non-string ids should fail closed."
+  (let ((doclive--server-token "secret")
+        (doclive--bootstrap-codes (make-hash-table :test #'equal))
+        (sent nil)
+        (deleted nil))
+    (puthash "malformed-id-code"
+             (list :id 42 :expires (+ (float-time) 60))
+             doclive--bootstrap-codes)
+    (cl-letf (((symbol-function 'process-send-string)
+               (lambda (_proc string)
+                 (push string sent)))
+              ((symbol-function 'delete-process)
+               (lambda (_proc)
+                 (setq deleted t))))
+      (doclive--route-request 'fake-proc "/preview?id=abc&bootstrap=malformed-id-code")
+      (let ((response (mapconcat #'identity sent "")))
+        (should deleted)
+        (should (string-match-p "403 Forbidden" response))
+        (should (gethash "malformed-id-code" doclive--bootstrap-codes))))))
 
 (ert-deftest doclive-test-route-request-allows-cookie-authorized-content ()
   "Protected content routes should accept the HttpOnly session cookie."
