@@ -22,7 +22,7 @@
   - Initial preview URLs use short-lived single-use bootstrap codes and redirect to token-free preview URLs.
   - Preview API and SSE requests use an HttpOnly SameSite session cookie instead of query tokens.
   - Referrer suppression and nosniff headers on local HTTP responses.
-  - Inline preview runtime scripts and styles use response-local CSP nonces separate from bearer tokens.
+  - Inline preview runtime scripts and styles use response-local CSP nonces separate from the session cookie.
   - HTTP request parsing accepts only GET origin-form paths.
   - SSE responses also send no-referrer, nosniff, and no-store cache headers.
   - Local linked document navigation stays under the source file directory by default.

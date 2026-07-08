@@ -96,6 +96,7 @@
     (should-not (string-match-p (regexp-quote "routes with a per-session bearer token") melpa-notes))
     (should (string-match-p (regexp-quote "short-lived single-use bootstrap codes") news))
     (should (string-match-p (regexp-quote "long-lived session token") news))
+    (should (string-match-p (regexp-quote "session cookie") news))
     (should-not (string-match-p (regexp-quote "Preview pages remove bearer tokens from the visible browser URL") news))))
 
 (ert-deftest doclive-test-release-docs-cover-primary-user-claims ()
@@ -485,7 +486,7 @@
     (should (string-match-p "katex" (downcase html)))))
 
 (ert-deftest doclive-test-preview-html-disables-referrers ()
-  "Preview HTML should prevent token-bearing URLs from leaking as referrers."
+  "Preview HTML should prevent bootstrap URLs from leaking as referrers."
   (let ((html (doclive--preview-html)))
     (should (string-match-p
              (regexp-quote "<meta name='referrer' content='no-referrer'>")
@@ -759,7 +760,7 @@
     (should (string-match-p (regexp-quote "\\.(md|org|html)($|#|\\?)") html))))
 
 (ert-deftest doclive-test-preview-html-omits-token-from-server-calls ()
-  "Preview HTML should avoid sending bearer tokens on local server requests."
+  "Preview HTML should avoid sending query tokens on local server requests."
   (let ((html (doclive--preview-html)))
     (should-not (string-match-p "currentToken=qs.get('token')" html))
     (should-not (string-match-p "function authedPath" html))
@@ -780,7 +781,7 @@
       (regexp-quote "history.replaceState({id:currentId},'',`?id=${encodeURIComponent(currentId)}&token=${encodeURIComponent(currentToken)}`)")
       html))))
 
-(ert-deftest doclive-test-preview-html-scrubs-token-from-history ()
+(ert-deftest doclive-test-preview-html-scrubs-sensitive-query-from-history ()
   "Preview HTML should remove bootstrap leftovers from the visible browser URL."
   (let ((html (doclive--preview-html)))
     (should (string-match-p "function scrubSensitiveQueryFromLocation" html))
@@ -1205,7 +1206,7 @@
       (should-not (string-match-p "preview" (mapconcat #'identity sent ""))))))
 
 (ert-deftest doclive-test-route-request-uses-response-nonce-not-token ()
-  "Preview responses should not reuse the bearer token as the CSP nonce."
+  "Preview responses should not reuse the session cookie as the CSP nonce."
   (let ((doclive--server-token "secret")
         (sent nil)
         (deleted nil))

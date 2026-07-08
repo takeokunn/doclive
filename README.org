@@ -99,7 +99,7 @@ fragment や query はファイル解決時には無視され、remote URL や�
 M-x doclive-stop-server
 #+end_example
 
-サーバー停止時には現在のセッション token が破棄されるため、既存の preview URL は次回起動後に使い回せません。
+サーバー停止時には現在の session cookie と未使用の bootstrap code が破棄されるため、既存の初回 preview URL は次回起動後に使い回せません。
 
 ** プレビュー再読み込み
 
@@ -128,7 +128,7 @@ doclive はローカルHTTPサーバーを起動し、既定では =127.0.0.1= �
 また、バッファで =doclive-preview-mode= を無効化すると、そのバッファの preview entry、SSE client、更新 timer を削除し、以後は配信対象から外します。
 未使用の bootstrap code を含むURLは共有・ログ貼り付け・公開スクリーンショットへの写り込みを避けてください。
 preview HTML と HTTP response は =no-referrer= を設定し、bootstrap code を含む初回URLが外部CDNへの Referer として送られないようにします。
-inline runtime script と style は bearer token とは別の response-local nonce で許可され、request-line は origin-form の絶対パスだけを受け付けます。
+inline runtime script と style は session cookie とは別の response-local nonce で許可され、request-line は origin-form の絶対パスだけを受け付けます。
 
 非loopback hostに bind すると、同一ネットワーク上のブラウザからも到達可能になります。
 必要な場合だけ =doclive-host= を変更し、=doclive-allow-non-loopback-host= を非nilにしてください。

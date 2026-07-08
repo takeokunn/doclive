@@ -860,7 +860,7 @@ runtime script and style when it is safe for CSP nonce use."
                         found decoded-value))))))))))
 
 (defun doclive--valid-query-p (path)
-  "Return non-nil when PATH has safe query syntax and no duplicate token."
+  "Return non-nil when PATH has safe query syntax for routing."
   (or (not (and path (string-match "\\?" path)))
       (let ((pairs (split-string (substring path (1+ (match-beginning 0))) "&" t))
             invalid
