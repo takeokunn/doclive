@@ -303,6 +303,27 @@ they resolve under the current document's directory."
   (or doclive--server-token
       (setq doclive--server-token (doclive--random-token))))
 
+(defun doclive--secure-string-equal-p (left right)
+  "Return non-nil when LEFT and RIGHT are equal without early exit."
+  (and (stringp left)
+       (stringp right)
+       (let* ((left-bytes (encode-coding-string left 'utf-8-unix t))
+              (right-bytes (encode-coding-string right 'utf-8-unix t))
+              (left-len (string-bytes left-bytes))
+              (right-len (string-bytes right-bytes))
+              (max-len (max left-len right-len))
+              (diff (logxor left-len right-len)))
+         (dotimes (index max-len)
+           (setq diff
+                 (logior diff
+                         (logxor (if (< index left-len)
+                                     (aref left-bytes index)
+                                   0)
+                                 (if (< index right-len)
+                                     (aref right-bytes index)
+                                   0)))))
+         (zerop diff))))
+
 (defun doclive--valid-host-p (host)
   "Return non-nil when HOST is usable in the local preview URL."
   (and (stringp host)
@@ -730,7 +751,7 @@ SSE client for live-update support."
   (let ((token (doclive--query-param path "token")))
     (and (stringp doclive--server-token)
          (stringp token)
-         (string= token doclive--server-token))))
+         (doclive--secure-string-equal-p token doclive--server-token))))
 
 (defun doclive--send-forbidden (proc)
   "Send a forbidden response on PROC and close it."

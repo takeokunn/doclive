@@ -857,12 +857,32 @@
   (let ((doclive-change-debounce-ms "fast"))
     (should-error (doclive--validated-debounce-seconds) :type 'user-error)))
 
+(ert-deftest doclive-test-secure-string-equal-p ()
+  "Token comparison should handle equality and mismatches without type coercion."
+  (should (doclive--secure-string-equal-p "secret" "secret"))
+  (should (doclive--secure-string-equal-p "" ""))
+  (should-not (doclive--secure-string-equal-p "secret" "secreu"))
+  (should-not (doclive--secure-string-equal-p "secret" "secret-suffix"))
+  (should-not (doclive--secure-string-equal-p "secret" nil))
+  (should-not (doclive--secure-string-equal-p nil "secret")))
+
 (ert-deftest doclive-test-authorized-request-requires-current-token ()
   "Route authorization should require the current session token."
   (let ((doclive--server-token "secret token"))
     (should (doclive--authorized-request-p "/content?id=abc&token=secret+token"))
     (should-not (doclive--authorized-request-p "/content?id=abc"))
     (should-not (doclive--authorized-request-p "/content?id=abc&token=wrong"))))
+
+(ert-deftest doclive-test-authorized-request-uses-secure-token-compare ()
+  "Route authorization should use the hardened token comparison helper."
+  (let ((doclive--server-token "secret")
+        (seen nil))
+    (cl-letf (((symbol-function 'doclive--secure-string-equal-p)
+               (lambda (left right)
+                 (setq seen (list left right))
+                 t)))
+      (should (doclive--authorized-request-p "/content?id=abc&token=provided"))
+      (should (equal seen '("provided" "secret"))))))
 
 (ert-deftest doclive-test-route-request-rejects-prefix-collisions ()
   "HTTP routes should not match prefixed paths."
