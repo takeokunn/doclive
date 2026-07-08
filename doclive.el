@@ -152,6 +152,16 @@ URL."
   :type '(alist :key-type symbol :value-type string)
   :group 'doclive)
 
+(defconst doclive--preview-asset-keys
+  '(highlight-css
+    katex-css
+    marked-script
+    highlight-script
+    katex-script
+    katex-auto-render-script
+    mermaid-script)
+  "Asset keys required by the doclive browser preview page.")
+
 (defcustom doclive-allow-linked-document-parent-directory nil
   "Whether local link navigation may open files outside the source directory.
 When nil, doclive opens linked Markdown and Org documents only when
@@ -265,8 +275,22 @@ they resolve under the current document's directory."
    ((doclive--absolute-asset-url-origin url))
    (t "'self'")))
 
+(defun doclive--validate-preview-asset-urls ()
+  "Signal an error when `doclive-preview-asset-urls' is malformed."
+  (unless (and (listp doclive-preview-asset-urls)
+               (cl-every (lambda (entry)
+                           (and (consp entry)
+                                (symbolp (car entry))
+                                (stringp (cdr entry))))
+                         doclive-preview-asset-urls))
+    (error "Invalid doclive-preview-asset-urls; expected an alist of symbol keys and string URLs"))
+  (dolist (key doclive--preview-asset-keys)
+    (unless (alist-get key doclive-preview-asset-urls)
+      (error "Missing doclive preview asset URL for %S" key))))
+
 (defun doclive--preview-asset-csp-sources ()
   "Return CSP sources required by `doclive-preview-asset-urls'."
+  (doclive--validate-preview-asset-urls)
   (let (sources)
     (dolist (source (cons "'self'"
                           (delq nil
@@ -309,9 +333,8 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
 
 (defun doclive--preview-asset-url (key)
   "Return the escaped preview asset URL for KEY."
+  (doclive--validate-preview-asset-urls)
   (let ((url (alist-get key doclive-preview-asset-urls)))
-    (unless url
-      (error "Missing doclive preview asset URL for %S" key))
     (unless (doclive--safe-asset-url-p url)
       (error "Unsafe doclive preview asset URL for %S" key))
     (doclive--escape-html-attribute url)))

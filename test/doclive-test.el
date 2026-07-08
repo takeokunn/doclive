@@ -596,6 +596,16 @@
            (mermaid-script . "https://example.invalid/mermaid.js"))))
     (should-error (doclive--preview-html) :type 'error)))
 
+(ert-deftest doclive-test-preview-html-rejects-malformed-asset-alist ()
+  "Preview HTML should reject malformed asset customization clearly."
+  (let ((doclive-preview-asset-urls t))
+    (should-error (doclive--preview-html) :type 'error))
+  (let ((doclive-preview-asset-urls '("bad-entry")))
+    (should-error (doclive--preview-html) :type 'error))
+  (let ((doclive-preview-asset-urls
+         '((highlight-css . "https://example.invalid/highlight.css"))))
+    (should-error (doclive--preview-html) :type 'error)))
+
 (ert-deftest doclive-test-preview-asset-url-safety-rejects-non-web-schemes ()
   "Asset URL validation should reject local and ambiguous schemes."
   (dolist (url '("file:///tmp/marked.js"
