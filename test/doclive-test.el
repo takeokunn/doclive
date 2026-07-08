@@ -1183,6 +1183,18 @@
                  "/content?id=abc"
                  '(("cookie" . "doclive-token=secret-token_1.2~3; doclive-token=secret-token_1.2~3"))))))
 
+(ert-deftest doclive-test-parse-request-headers-rejects-invalid-field-names ()
+  "Header parsing should ignore malformed field names."
+  (should
+   (equal (doclive--parse-request-headers
+           "GET / HTTP/1.1\r\nCookie: doclive-token=secret\r\nX-Test: ok\r\n\r\n")
+          '(("cookie" . "doclive-token=secret")
+            ("x-test" . "ok"))))
+  (should
+   (equal (doclive--parse-request-headers
+           "GET / HTTP/1.1\r\nBad Name: nope\r\nBad\tName: nope\r\nCookie: doclive-token=secret\r\n\r\n")
+          '(("cookie" . "doclive-token=secret")))))
+
 (ert-deftest doclive-test-authorized-request-uses-secure-token-compare ()
   "Route authorization should use the hardened token comparison helper."
   (let ((doclive--server-token "secret")

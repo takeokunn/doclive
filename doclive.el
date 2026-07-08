@@ -906,14 +906,20 @@ runtime script and style when it is safe for CSP nonce use."
                (t
                 (puthash normalized-key t seen-keys)))))))))
 
+(defconst doclive--http-header-name-regexp
+  "\\`[!#$%&'*+.^_`|~0-9A-Za-z-]+\\'"
+  "Regexp matching supported HTTP header field names.")
+
 (defun doclive--parse-request-headers (request)
   "Parse HTTP REQUEST headers into a case-folded alist."
   (let (headers)
     (dolist (line (cdr (split-string request "\r\n" t)) (nreverse headers))
       (when (string-match "\\`\\([^:]+\\):[ \t]*\\(.*\\)\\'" line)
-        (push (cons (downcase (match-string 1 line))
-                    (match-string 2 line))
-              headers)))))
+        (let ((name (match-string 1 line)))
+          (when (string-match-p doclive--http-header-name-regexp name)
+            (push (cons (downcase name)
+                        (match-string 2 line))
+                  headers)))))))
 
 (defun doclive--request-header-values (headers name)
   "Return all values for HTTP header NAME in HEADERS."
