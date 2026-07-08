@@ -33,6 +33,7 @@
     actions, media posters, and unparsed srcset lists are covered.
   - HTTP response bodies are emitted as UTF-8 bytes before computing Content-Length.
   - SSE broadcast drops failed clients while continuing delivery to healthy clients.
+  - Empty SSE client sets are removed instead of leaving stale tracking entries.
   - Content JSON no longer exposes source file paths to the browser runtime.
   - Session lifecycle management: buffer-kill cleanup, preview-mode disable cleanup, server-stop token invalidation, Emacs shutdown hook.
   - Release gate includes byte-compilation, ERT tests, checkdoc, package-lint, autoload generation, whitespace checks, secret scanning, and GitHub Actions security checks.

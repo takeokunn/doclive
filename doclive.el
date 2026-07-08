@@ -414,7 +414,10 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
 
 (defun doclive--set-sse-clients-for (id clients)
   "Set SSE CLIENTS list for ID."
-  (puthash id (seq-filter #'process-live-p clients) doclive--sse-clients))
+  (let ((live-clients (seq-filter #'process-live-p clients)))
+    (if live-clients
+        (puthash id live-clients doclive--sse-clients)
+      (remhash id doclive--sse-clients))))
 
 (defun doclive--broadcast-revision (id revision)
   "Push REVISION event to all SSE clients of ID."

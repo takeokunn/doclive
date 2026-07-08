@@ -1199,6 +1199,15 @@
       (should (equal (gethash "buffer-id" doclive--sse-clients)
                      '(healthy-client))))))
 
+(ert-deftest doclive-test-set-sse-clients-removes-empty-client-sets ()
+  "Empty SSE client lists should not leave stale hash entries."
+  (let ((doclive--sse-clients (make-hash-table :test #'equal)))
+    (puthash "buffer-id" '(dead-client) doclive--sse-clients)
+    (cl-letf (((symbol-function 'process-live-p)
+               (lambda (_proc) nil)))
+      (doclive--set-sse-clients-for "buffer-id" '(dead-client))
+      (should-not (gethash "buffer-id" doclive--sse-clients)))))
+
 (ert-deftest doclive-test-cleanup-stale-entries-removes-dead-buffers ()
   "Stale buffer entries should be pruned on demand."
   (let* ((buf (generate-new-buffer " *doclive-stale*"))
