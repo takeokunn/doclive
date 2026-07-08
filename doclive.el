@@ -862,7 +862,7 @@ runtime script and style when it is safe for CSP nonce use."
                         found decoded-value))))))))))
 
 (defun doclive--query-key-present-p (path key)
-  "Return non-nil when PATH contains query KEY after URL decoding."
+  "Return non-nil if query KEY appears in PATH after URL decoding."
   (when (and path (string-match "\\?" path))
     (let ((pairs (split-string (substring path (1+ (match-beginning 0))) "&"))
           (wanted (downcase key)))
