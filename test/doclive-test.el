@@ -674,6 +674,29 @@
     (should-not (string-match-p (regexp-quote "<script nonce='abc123_-'>") html))
     (should-not (string-match-p (regexp-quote "<script>") html))))
 
+(ert-deftest doclive-test-browser-content-security-policy-is-locked-down ()
+  "Preview CSP should deny ambient capabilities and allow only nonce-tagged inline assets."
+  (let ((policy (doclive--browser-content-security-policy "nonce123_-")))
+    (should (string-match-p (regexp-quote "default-src 'none'") policy))
+    (should (string-match-p (regexp-quote "base-uri 'none'") policy))
+    (should (string-match-p (regexp-quote "form-action 'none'") policy))
+    (should (string-match-p (regexp-quote "frame-ancestors 'none'") policy))
+    (should (string-match-p (regexp-quote "object-src 'none'") policy))
+    (should (string-match-p (regexp-quote "connect-src 'self'") policy))
+    (should (string-match-p (regexp-quote "'nonce-nonce123_-'") policy))
+    (should-not (string-match-p (regexp-quote "unsafe-inline") policy))))
+
+(ert-deftest doclive-test-session-cookie-header-is-http-only ()
+  "Session cookie header should use only a validated token value."
+  (let ((doclive--server-token "abcDEF_-.~1"))
+    (should (equal (doclive--session-cookie-header)
+                   "Set-Cookie: doclive-token=abcDEF_-.~1; Path=/; SameSite=Strict; HttpOnly\r\n")))
+  (let ((doclive--server-token "bad token"))
+    (should-not (doclive--session-cookie-header)))
+  (should (doclive--safe-cookie-token-p "abcDEF_-.~1"))
+  (should-not (doclive--safe-cookie-token-p "bad token"))
+  (should-not (doclive--safe-cookie-token-p "bad%20token")))
+
 (ert-deftest doclive-test-preview-html-omits-unsafe-nonce ()
   "Preview HTML should not embed tokens unsafe for CSP header use."
   (let ((html (doclive--preview-html "bad token\r\n")))
@@ -840,6 +863,8 @@
   (should-not (doclive--parse-request-path "GET / HTTP/1.1 trailing"))
   (should-not (doclive--parse-request-path "GET  HTTP/1.1"))
   (should-not (doclive--parse-request-path "GET / HTTP/1"))
+  (should-not (doclive--parse-request-path "GET / HTTP/0.9"))
+  (should-not (doclive--parse-request-path "GET / HTTP/2.0"))
   (should-not (doclive--parse-request-path "GET http://127.0.0.1/preview HTTP/1.1"))
   (should-not (doclive--parse-request-path "GET * HTTP/1.1"))
   (should-not (doclive--parse-request-path "GET /preview#token HTTP/1.1")))
@@ -851,6 +876,8 @@
   (should-not (doclive--valid-request-line-p "POST /preview?id=x HTTP/1.1"))
   (should-not (doclive--valid-request-line-p "GET /preview?id=x HTTP/1.1 extra"))
   (should-not (doclive--valid-request-line-p "GET /preview?id=x HTTP/1"))
+  (should-not (doclive--valid-request-line-p "GET /preview?id=x HTTP/0.9"))
+  (should-not (doclive--valid-request-line-p "GET /preview?id=x HTTP/2.0"))
   (should-not (doclive--valid-request-line-p "GET http://127.0.0.1/preview HTTP/1.1"))
   (should-not (doclive--valid-request-line-p "GET * HTTP/1.1"))
   (should-not (doclive--valid-request-line-p "GET /preview#token HTTP/1.1"))
@@ -1006,6 +1033,45 @@
       (doclive-stop-server))
     (should-not doclive--server-token)
     (should (= (hash-table-count doclive--bootstrap-codes) 0))))
+
+(ert-deftest doclive-test-preview-buffer-opens-bootstrap-url ()
+  "Preview command should open a bootstrap URL without leaking the session token."
+  (let ((doclive--server-token nil)
+        (doclive--bootstrap-codes (make-hash-table :test #'equal))
+        (doclive-host "127.0.0.1")
+        (doclive-port 39123)
+        (tokens '("session-token" "bootstrap-code"))
+        opened-url)
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'doclive-start-server)
+                 (lambda () (doclive--ensure-server-token)))
+                ((symbol-function 'doclive--snapshot-buffer)
+                 (lambda (_buffer) nil))
+                ((symbol-function 'doclive--random-token)
+                 (lambda () (pop tokens)))
+                ((symbol-function 'message)
+                 (lambda (&rest _args) nil))
+                (doclive-open-browser-function
+                 (lambda (url) (setq opened-url url))))
+        (doclive-preview-buffer)
+        (should doclive-preview-mode)
+        (should (string-match-p (regexp-quote "/preview?id=") opened-url))
+        (should (string-match-p (regexp-quote "&bootstrap=bootstrap-code") opened-url))
+        (should-not (string-match-p (regexp-quote doclive--server-token) opened-url))
+        (should (gethash "bootstrap-code" doclive--bootstrap-codes))))))
+
+(ert-deftest doclive-test-reload-page-requires-active-preview-mode ()
+  "Reload command should only snapshot buffers with active preview mode."
+  (let ((snapshots 0))
+    (with-temp-buffer
+      (should-error (doclive-reload-page) :type 'user-error)
+      (setq-local doclive-preview-mode t)
+      (cl-letf (((symbol-function 'doclive--snapshot-buffer)
+                 (lambda (_buffer) (cl-incf snapshots)))
+                ((symbol-function 'message)
+                 (lambda (&rest _args) nil)))
+        (doclive-reload-page)
+        (should (= snapshots 1))))))
 
 (ert-deftest doclive-test-start-server-validates-host-and-port ()
   "Server startup should reject malformed local server settings."
@@ -1373,6 +1439,61 @@
       (should deleted)
       (should (string-match-p "403 Forbidden" (mapconcat #'identity sent "")))
       (should-not (string-match-p "preview" (mapconcat #'identity sent ""))))))
+
+(ert-deftest doclive-test-route-request-rejects-forged-queries-with-cookie ()
+  "Protected routes should reject forged query parameters even with a valid cookie."
+  (dolist (path '("/content?id=abc&token=secret"
+                  "/events?id=abc&token=secret"
+                  "/preview?id=abc&bootstrap=bootstrap-code"))
+    (let ((doclive--server-token "secret")
+          (sent nil)
+          (deleted nil)
+          (called nil))
+      (cl-letf (((symbol-function 'doclive--preview-html)
+                 (lambda (&optional _script-nonce)
+                   (setq called t)
+                   "preview"))
+                ((symbol-function 'doclive--json-for-id)
+                 (lambda (_id)
+                   (setq called t)
+                   "{}"))
+                ((symbol-function 'doclive--get-entry)
+                 (lambda (_id)
+                   (setq called t)
+                   '(:buffer nil)))
+                ((symbol-function 'process-send-string)
+                 (lambda (_proc string)
+                   (push string sent)))
+                ((symbol-function 'delete-process)
+                 (lambda (_proc)
+                   (setq deleted t))))
+        (doclive--route-request 'fake-proc path '(("cookie" . "doclive-token=secret")))
+        (should deleted)
+        (should-not called)
+        (should (string-match-p "403 Forbidden" (mapconcat #'identity sent "")))))))
+
+(ert-deftest doclive-test-route-request-does-not-bootstrap-cookie-requests ()
+  "Preview bootstrap codes should not be accepted from cookie-authenticated requests."
+  (let ((doclive--server-token "secret")
+        (doclive--bootstrap-codes (make-hash-table :test #'equal))
+        (sent nil)
+        (deleted nil))
+    (puthash "bootstrap-code"
+             (list :id "abc" :expires (+ (float-time) 30))
+             doclive--bootstrap-codes)
+    (cl-letf (((symbol-function 'process-send-string)
+               (lambda (_proc string)
+                 (push string sent)))
+              ((symbol-function 'delete-process)
+               (lambda (_proc)
+                 (setq deleted t))))
+      (doclive--route-request
+       'fake-proc
+       "/preview?id=abc&bootstrap=bootstrap-code"
+       '(("cookie" . "doclive-token=secret")))
+      (should deleted)
+      (should (string-match-p "403 Forbidden" (mapconcat #'identity sent "")))
+      (should (gethash "bootstrap-code" doclive--bootstrap-codes)))))
 
 (ert-deftest doclive-test-route-request-rejects-empty-query-segments ()
   "Authenticated routes should reject empty query strings or segments."
@@ -1850,6 +1971,32 @@
                    (lambda (_proc)
                      (setq deleted t))))
           (doclive--connection-filter proc "POST /?token=secret HTTP/1.1\r\nHost: example\r\n\r\n")
+          (should deleted)
+          (should-not routed)
+          (should (string-match-p "400 Bad Request" (mapconcat #'identity sent ""))))
+      (when (process-live-p proc)
+        (delete-process proc)))))
+
+(ert-deftest doclive-test-connection-filter-rejects-unsupported-http-versions ()
+  "Connection filter should reject unsupported HTTP versions before routing."
+  (let ((sent nil)
+        (deleted nil)
+        (routed nil)
+        (proc (make-process :name "doclive-test-invalid-http-version"
+                            :buffer nil
+                            :command '("cat")
+                            :noquery t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'doclive--route-request)
+                   (lambda (_proc _path &optional _headers)
+                     (setq routed t)))
+                  ((symbol-function 'process-send-string)
+                   (lambda (_proc string)
+                     (push string sent)))
+                  ((symbol-function 'delete-process)
+                   (lambda (_proc)
+                     (setq deleted t))))
+          (doclive--connection-filter proc "GET /content?id=abc HTTP/2.0\r\nHost: example\r\n\r\n")
           (should deleted)
           (should-not routed)
           (should (string-match-p "400 Bad Request" (mapconcat #'identity sent ""))))

@@ -184,8 +184,8 @@ they resolve under the current document's directory."
   "Lifetime in seconds for single-use preview bootstrap codes.")
 
 (defconst doclive--request-line-regexp
-  "\\`GET \\(/[^[:space:]#]*\\) HTTP/[0-9]+\\.[0-9]+\\(?:\r\\)?\\'"
-  "Regexp matching the supported HTTP request line format.")
+  "\\`GET \\(/[^[:space:]#]*\\) HTTP/1\\.[01]\\(?:\r\\)?\\'"
+  "Regexp matching the supported HTTP/1.0 or HTTP/1.1 request line format.")
 
 (defconst doclive--browser-security-base-headers
   '(("Referrer-Policy" . "no-referrer")
@@ -1123,6 +1123,9 @@ runtime script and style when it is safe for CSP nonce use."
     (cond
      ((doclive--authorized-request-p path headers)
       (doclive--send-preview proc))
+     ((and (doclive--query-key-present-p path "bootstrap")
+           (doclive--cookie-token headers))
+      (doclive--send-forbidden proc))
      ((doclive--consume-bootstrap-code-p path)
       (doclive--send-bootstrap-redirect proc path))
      (t
