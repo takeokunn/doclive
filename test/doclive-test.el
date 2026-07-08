@@ -1108,6 +1108,9 @@
              "/content?id=abc" '(("cookie" . "doclive-token=secret-token_1.2~3"))))
     (should (doclive--authorized-request-p
              "/content?id=abc" '(("cookie" . "other=x; doclive-token=secret-token_1.2~3"))))
+    (should-not (doclive--authorized-request-p
+                 "/content?id=abc&token=secret-token_1.2~3"
+                 '(("cookie" . "doclive-token=secret-token_1.2~3"))))
     (should-not (doclive--authorized-request-p "/content?id=abc"))
     (should-not (doclive--authorized-request-p "/content?id=abc&token=wrong"))
     (should-not (doclive--authorized-request-p "/content?id=abc&token=%ZZ"))
@@ -1203,6 +1206,25 @@
       (should (string-match-p "403 Forbidden" (mapconcat #'identity sent "")))
       (should-not (string-match-p "Set-Cookie: doclive-token=secret; Path=/; SameSite=Strict; HttpOnly"
                                   (mapconcat #'identity sent "")))
+      (should-not (string-match-p "preview" (mapconcat #'identity sent ""))))))
+
+(ert-deftest doclive-test-route-request-rejects-token-query-with-cookie ()
+  "Authenticated preview route should still reject token query parameters."
+  (let ((doclive--server-token "secret")
+        (sent nil)
+        (deleted nil))
+    (cl-letf (((symbol-function 'doclive--preview-html)
+               (lambda (&optional _script-nonce) "preview"))
+              ((symbol-function 'process-send-string)
+               (lambda (_proc string)
+                 (push string sent)))
+              ((symbol-function 'delete-process)
+               (lambda (_proc)
+                 (setq deleted t))))
+      (doclive--route-request
+       'fake-proc "/preview?token=secret" '(("cookie" . "doclive-token=secret")))
+      (should deleted)
+      (should (string-match-p "403 Forbidden" (mapconcat #'identity sent "")))
       (should-not (string-match-p "preview" (mapconcat #'identity sent ""))))))
 
 (ert-deftest doclive-test-route-request-uses-response-nonce-not-token ()

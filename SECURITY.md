@@ -30,7 +30,8 @@ doclive starts a local HTTP server for preview rendering.  The default bind host
 is `127.0.0.1`.  Initial preview URLs use a short-lived, single-use bootstrap code
 rather than the long-lived session token.  A valid bootstrap request sets a
 `doclive-token` cookie with `HttpOnly` and `SameSite=Strict`, then redirects to a token-free preview URL.  Subsequent `/content`, `/open`, and `/events` requests
-are authorized by that cookie instead of a query token.
+are authorized by that cookie instead of a query token.  Requests containing a
+`token` query parameter are rejected even when the cookie is valid.
 
 Binding to a non-loopback host requires changing `doclive-host` and explicitly
 setting `doclive-allow-non-loopback-host` to non-nil.
