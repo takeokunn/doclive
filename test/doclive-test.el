@@ -886,6 +886,7 @@
   "Route-level query validation should reject ambiguous or token-bearing URLs."
   (should (doclive--valid-query-p "/content?id=abc&path=target.md"))
   (should-not (doclive--valid-query-p "/content?id=abc&id=def"))
+  (should-not (doclive--valid-query-p "/content?id=abc&ID=def"))
   (should-not (doclive--valid-query-p "/open?path=one.md&path=two.md"))
   (should-not (doclive--valid-query-p "/content?id=abc&debug"))
   (should-not (doclive--valid-query-p "/content?"))
@@ -895,7 +896,8 @@
   (should-not (doclive--valid-query-p "/preview?token=secret"))
   (should-not (doclive--valid-query-p "/preview?token"))
   (should-not (doclive--valid-query-p "/preview?Token=secret"))
-  (should-not (doclive--valid-query-p "/preview?%74oken=secret")))
+  (should-not (doclive--valid-query-p "/preview?%74oken=secret"))
+  (should-not (doclive--valid-query-p "/preview?id=abc&bootstrap=one&BOOTSTRAP=two")))
 
 (ert-deftest doclive-test-random-token-uses-openssl-rand ()
   "Token generation should prefer OS-backed random bytes when available."

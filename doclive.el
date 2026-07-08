@@ -892,17 +892,18 @@ runtime script and style when it is safe for CSP nonce use."
             (let* ((eq (match-beginning 0))
                    (raw-key (substring p 0 eq))
                    (raw-value (substring p (1+ eq)))
-                   (decoded-key (doclive--decode-query-component raw-key)))
+                   (decoded-key (doclive--decode-query-component raw-key))
+                   (normalized-key (and decoded-key (downcase decoded-key))))
               (cond
                ((or (null decoded-key)
                     (null (doclive--decode-query-component raw-value)))
                 (setq invalid t))
-               ((gethash decoded-key seen-keys)
+               ((gethash normalized-key seen-keys)
                 (setq duplicate t))
-               ((string= (downcase decoded-key) "token")
+               ((string= normalized-key "token")
                 (setq token-parameter t))
                (t
-                (puthash decoded-key t seen-keys)))))))))
+                (puthash normalized-key t seen-keys)))))))))
 
 (defun doclive--parse-request-headers (request)
   "Parse HTTP REQUEST headers into a case-folded alist."
