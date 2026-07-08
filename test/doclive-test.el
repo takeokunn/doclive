@@ -1221,6 +1221,31 @@
     (should-not (doclive--valid-host-header-p
                  "GET / HTTP/1.1"
                  '(("host" . "127.0.0.1:39123 bad")))))
+  (let ((doclive-host "127.0.0.1")
+        (doclive-port 39123))
+    (should (doclive--valid-host-header-p
+             "GET / HTTP/1.0"
+             nil))
+    (should-not (doclive--valid-host-header-p
+                 "GET / HTTP/1.0"
+                 '(("host" . "127.0.0.1:39123")
+                   ("host" . "127.0.0.1:39123")))))
+  (let ((doclive-host "::1")
+        (doclive-port 39123))
+    (should (doclive--valid-host-header-p
+             "GET / HTTP/1.1"
+             '(("host" . "[::1]:39123"))))
+    (should-not (doclive--valid-host-header-p
+                 "GET / HTTP/1.1"
+                 '(("host" . "[::2]:39123"))))
+    (should-not (doclive--valid-host-header-p
+                 "GET / HTTP/1.1"
+                 '(("host" . "[::1]:70000")))))
+  (let ((doclive-host "[::1]")
+        (doclive-port 39123))
+    (should (doclive--valid-host-header-p
+             "GET / HTTP/1.1"
+             '(("host" . "[::1]")))))
   (let ((doclive-host "0.0.0.0")
         (doclive-port 39123))
     (should (doclive--valid-host-header-p
