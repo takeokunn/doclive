@@ -591,6 +591,10 @@
              (regexp-quote "raw.indexOf(String.fromCharCode(92))!==-1")
              html))
     (should (string-match-p
+             (regexp-quote "if(/[\\u0000-\\u001F\\u007F]/.test(raw)) return '';")
+             html))
+    (should (string-match-p (regexp-quote "return raw.trim();") html))
+    (should (string-match-p
              (regexp-quote
               "if(/^[a-z][a-z0-9+.-]*:/.test(folded)&&!/^(https?:|mailto:)/.test(folded)) return '';")
              html))))
@@ -686,6 +690,7 @@
 (ert-deftest doclive-test-preview-html-wires-html-links ()
   "Preview HTML should intercept Org-exported HTML document links."
   (let ((html (doclive--preview-html)))
+    (should (string-match-p (regexp-quote "href.startsWith('//')") html))
     (should (string-match-p (regexp-quote "\\.(md|org|html)($|#|\\?)") html))))
 
 (ert-deftest doclive-test-preview-html-uses-token-for-server-calls ()

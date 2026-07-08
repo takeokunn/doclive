@@ -27,7 +27,9 @@
   - Local linked document navigation stays under the source file directory by default.
   - Preview commands and linked-document navigation disable local-variable evaluation while opening files.
   - Validation for host, port, debounce delay, and customized browser asset URLs.
-  - Browser asset URLs are escaped before HTML embedding and active-content schemes are rejected.
+  - Browser asset URLs are escaped before HTML embedding; malformed authorities,
+    userinfo, non-numeric ports, and active-content schemes are rejected.
+  - Rendered document URL attributes are allowlisted before DOM insertion.
   - Session lifecycle management: buffer-kill cleanup, preview-mode disable cleanup, server-stop token invalidation, Emacs shutdown hook.
   - Release gate includes byte-compilation, ERT tests, checkdoc, package-lint, autoload generation, whitespace checks, secret scanning, and GitHub Actions security checks.
   - Customizable host, port, browser-open function, and debounce delay.
