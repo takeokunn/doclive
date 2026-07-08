@@ -1371,6 +1371,14 @@
                "GET / HTTP/1.1\r\nBad\tName: nope\r\nCookie: doclive-token=secret\r\n\r\n")
               :invalid)))
 
+(ert-deftest doclive-test-parse-request-headers-rejects-control-values ()
+  "Header parsing should reject control characters in field values."
+  (should (eq (doclive--parse-request-headers
+               (concat "GET / HTTP/1.1\r\n"
+                       "Host: 127.0.0.1:39123\r\n"
+                       "Cookie: doclive-token=sec" (string 0) "ret\r\n\r\n"))
+              :invalid)))
+
 (ert-deftest doclive-test-parse-request-headers-rejects-folded-lines ()
   "Header parsing should fail closed on obsolete folded headers."
   (should (eq (doclive--parse-request-headers
@@ -2096,6 +2104,37 @@
             (should (string-match-p "400 Bad Request" (mapconcat #'identity sent ""))))
         (when (process-live-p proc)
           (delete-process proc))))))
+
+(ert-deftest doclive-test-connection-filter-rejects-control-paths ()
+  "Connection filter should reject request targets containing control characters."
+  (let ((sent nil)
+        (deleted nil)
+        (routed nil)
+        (doclive-host "127.0.0.1")
+        (doclive-port 39123)
+        (proc (make-process :name "doclive-test-control-path"
+                            :buffer nil
+                            :command '("cat")
+                            :noquery t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'doclive--route-request)
+                   (lambda (_proc _path &optional _headers)
+                     (setq routed t)))
+                  ((symbol-function 'process-send-string)
+                   (lambda (_proc string)
+                     (push string sent)))
+                  ((symbol-function 'delete-process)
+                   (lambda (_proc)
+                     (setq deleted t))))
+          (doclive--connection-filter
+           proc
+           (concat "GET /content" (string 0) "?id=abc HTTP/1.1\r\n"
+                   "Host: 127.0.0.1:39123\r\n\r\n"))
+          (should deleted)
+          (should-not routed)
+          (should (string-match-p "400 Bad Request" (mapconcat #'identity sent ""))))
+      (when (process-live-p proc)
+        (delete-process proc)))))
 
 (ert-deftest doclive-test-connection-filter-rejects-invalid-methods ()
   "Connection filter should reject non-GET requests instead of routing them."

@@ -184,7 +184,7 @@ they resolve under the current document's directory."
   "Lifetime in seconds for single-use preview bootstrap codes.")
 
 (defconst doclive--request-line-regexp
-  "\\`GET \\(/[^[:space:]#]*\\) HTTP/1\\.[01]\\(?:\r\\)?\\'"
+  "\\`GET \\(/[^[:space:][:cntrl:]#]*\\) HTTP/1\\.[01]\\(?:\r\\)?\\'"
   "Regexp matching the supported HTTP/1.0 or HTTP/1.1 request line format.")
 
 (defconst doclive--browser-security-base-headers
@@ -987,12 +987,12 @@ Return :invalid when REQUEST contains malformed or folded headers."
       (dolist (line (cdr (split-string request "\r\n" t)) (nreverse headers))
         (if (not (string-match "\\`\\([^:]+\\):[ \t]*\\(.*\\)\\'" line))
             (throw 'invalid :invalid)
-          (let ((name (match-string 1 line)))
-            (if (not (string-match-p doclive--http-header-name-regexp name))
+          (let ((name (match-string 1 line))
+                (value (match-string 2 line)))
+            (if (or (not (string-match-p doclive--http-header-name-regexp name))
+                    (string-match-p "[[:cntrl:]]" value))
                 (throw 'invalid :invalid)
-              (push (cons (downcase name)
-                          (match-string 2 line))
-                    headers))))))))
+              (push (cons (downcase name) value) headers))))))))
 
 (defun doclive--request-header-values (headers name)
   "Return all values for HTTP header NAME in HEADERS."
