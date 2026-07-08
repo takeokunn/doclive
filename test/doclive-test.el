@@ -1804,6 +1804,4 @@
       (when (process-live-p proc)
         (delete-process proc)))))
 
-(provide 'doclive-test)
-
 ;;; doclive-test.el ends here
