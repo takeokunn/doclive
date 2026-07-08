@@ -49,13 +49,19 @@ browser context.  The implementation therefore relies on:
 - pinned default browser assets
 - HTML sanitization before preview insertion
 - URL attribute allowlisting before preview insertion
-- local linked-document confinement under the source directory by default
+- local linked-document confinement under the source directory by default,
+  checked after symlink resolution
 - disabled local-variable evaluation for linked documents
 - token invalidation when the preview server stops
 - preview entry, SSE client, and update-timer cleanup when `doclive-preview-mode`
   is disabled for a buffer
 
 Reports that bypass or weaken these boundaries are security bugs.
+
+Linked Markdown and Org documents are confined by their resolved real paths by
+default.  A symlink inside the source directory that points outside the source
+directory is therefore rejected unless `doclive-allow-linked-document-parent-directory`
+is explicitly enabled for trusted documents.
 
 Rendered document URL attributes are kept only for relative links, anchors, and
 explicit `http:`, `https:`, or `mailto:` URLs.  Unsupported schemes,
