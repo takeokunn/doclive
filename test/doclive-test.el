@@ -103,6 +103,7 @@
     (should (equal (plist-get obj :name) name))
     (should (equal (plist-get obj :contentKind) "markdown"))
     (should (string-match-p "Hello" (plist-get obj :markdown)))
+    (should-not (plist-member obj :file))
     (should-not (plist-member obj :html))))
 
 (ert-deftest doclive-test-snapshot-json-markdown-content-kind ()

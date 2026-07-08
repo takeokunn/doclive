@@ -484,7 +484,6 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
              (base `((ok . t)
                      (buffer_id . ,id)
                      (name . ,(or (plist-get entry :name) ""))
-                     (file . ,(or (plist-get entry :file) ""))
                      (revision . ,(or (plist-get entry :revision) 0))
                      (contentKind . ,content-kind))))
         (json-encode
