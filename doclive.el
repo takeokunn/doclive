@@ -515,6 +515,7 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
        (not (string-empty-p rel))
        (not (string-match-p "\\\\" rel))
        (not (string-match-p "[[:cntrl:]]" rel))
+       (not (string-prefix-p "//" rel))
        (not (file-name-absolute-p rel))
        (not (string-match-p "\\`[[:alpha:]][[:alnum:]+.-]*:" rel))))
 

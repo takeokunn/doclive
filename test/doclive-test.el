@@ -316,6 +316,7 @@
              (should-not (doclive--resolve-linked-document entry "target.el"))
              (should-not (doclive--resolve-linked-document entry "orphan.html"))
              (should-not (doclive--resolve-linked-document entry "https://example.com/target.md"))
+             (should-not (doclive--resolve-linked-document entry "//example.com/target.md"))
              (should-not (doclive--resolve-linked-document entry "file:target.md"))
              (should-not (doclive--resolve-linked-document entry "/tmp/target.md"))
              (should-not (doclive--resolve-linked-document entry "subdir\\target.md"))
