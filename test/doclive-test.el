@@ -575,14 +575,25 @@
     (should (string-match-p "function escapeHtml" html))
     (should (string-match-p (regexp-quote "querySelectorAll('script,iframe,object,embed,link,meta,base')") html))
     (should (string-match-p (regexp-quote "/^on/i") html))
-    (should (string-match-p "javascript:" html))
-    (should (string-match-p "vbscript:" html))
-    (should (string-match-p "data:" html))
+    (should (string-match-p (regexp-quote "/^[a-z][a-z0-9+.-]*:/") html))
+    (should (string-match-p (regexp-quote "/^(https?:|mailto:)/") html))
     (should (string-match-p "xlink:href" html))
     (should (string-match-p (regexp-quote "name.toLowerCase()==='style'") html))
     (should (string-match-p (regexp-quote "el.setAttribute('rel','noopener noreferrer')") html))
     (should (string-match-p (regexp-quote "return '&#39;'") html))
     (should-not (string-match-p (regexp-quote ",:'&#39;'") html))))
+
+(ert-deftest doclive-test-preview-html-sanitizes-dangerous-content-urls ()
+  "Preview HTML should reject unsafe URL attributes in rendered documents."
+  (let ((html (doclive--preview-html)))
+    (should (string-match-p (regexp-quote "folded.startsWith('//')") html))
+    (should (string-match-p
+             (regexp-quote "raw.indexOf(String.fromCharCode(92))!==-1")
+             html))
+    (should (string-match-p
+             (regexp-quote
+              "if(/^[a-z][a-z0-9+.-]*:/.test(folded)&&!/^(https?:|mailto:)/.test(folded)) return '';")
+             html))))
 
 (ert-deftest doclive-test-preview-html-includes-csp-nonce ()
   "Preview HTML should nonce the inline runtime script."
