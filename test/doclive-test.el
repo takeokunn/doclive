@@ -606,6 +606,7 @@
     (should (string-match-p
              (regexp-quote "/^(href|src|xlink:href|formaction|action|poster)$/i")
              html))
+    (should (string-match-p (regexp-quote "lower==='ping'") html))
     (should (string-match-p
              (regexp-quote
               "href.indexOf(String.fromCharCode(92))!==-1")
