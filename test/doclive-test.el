@@ -510,10 +510,15 @@
                  "//cdn.example.invalid/marked.js"
                  "\\\\cdn.example.invalid\\marked.js"
                  "/vendor\\marked.js"
-                 "https://example.invalid/marked.js\nbad"))
+                 "https://example.invalid/marked.js\nbad"
+                 "https://example.invalid;script-src/marked.js"
+                 "https://example.invalid:bad/marked.js"
+                 "https://user@example.invalid/marked.js"
+                 "https:///marked.js"))
     (should-not (doclive--safe-asset-url-p url)))
   (dolist (url '("https://example.invalid/marked.js"
                  "http://127.0.0.1:8000/marked.js"
+                 "http://[::1]:8000/marked.js"
                  "/vendor/marked.js"
                  "vendor/marked.js"))
     (should (doclive--safe-asset-url-p url))))
@@ -897,6 +902,22 @@
       (should-not (string-match-p (regexp-quote "'nonce-abc123_-'") response))
       (should-not (string-match-p "script-src .*'unsafe-inline'" response))
       (should (string-match-p "connect-src 'self'\r\n" response)))))
+
+(ert-deftest doclive-test-http-response-csp-rejects-malformed-asset-origins ()
+  "CSP should not include malformed asset authorities."
+  (let ((doclive-preview-asset-urls
+         '((highlight-css . "https://assets.example.invalid;style-src/highlight.css")
+           (katex-css . "https://assets.example.invalid:bad/katex.css")
+           (marked-script . "https://user@assets.example.invalid/marked.js")
+           (highlight-script . "https:///highlight.js")
+           (katex-script . "/vendor/katex.js")
+           (katex-auto-render-script . "/vendor/auto-render.js")
+           (mermaid-script . "https://diagrams.example.invalid/mermaid.js"))))
+    (let ((response (doclive--http-response "200 OK" "text/plain" "body" "nonce123_-")))
+      (should-not (string-match-p "assets\\.example\\.invalid" response))
+      (should (string-match-p
+               (regexp-quote "https://diagrams.example.invalid")
+               response)))))
 
 (ert-deftest doclive-test-sse-handshake-sets-security-headers ()
   "SSE responses should set the same browser hardening headers."

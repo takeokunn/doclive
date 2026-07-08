@@ -201,6 +201,22 @@ they resolve under the current document's directory."
              (string-match-p "\\`[[:alnum:]+/_-]+\\'" nonce))
     nonce))
 
+(defun doclive--safe-asset-authority-p (authority)
+  "Return non-nil when AUTHORITY is safe as an HTTP asset authority."
+  (and (stringp authority)
+       (not (string-empty-p authority))
+       (or (string-match-p "\\`\\[[0-9a-fA-F:.]+\\]\\(?::[0-9]+\\)?\\'" authority)
+           (string-match-p "\\`[[:alnum:].-]+\\(?::[0-9]+\\)?\\'" authority))))
+
+(defun doclive--absolute-asset-url-origin (url)
+  "Return the normalized origin for absolute HTTP(S) asset URL, or nil."
+  (when (and (stringp url)
+             (string-match "\\`\\(https?\\)://\\([^/?#]+\\)\\(?:[/?#]\\|\\'\\)" url))
+    (let ((scheme (downcase (match-string 1 url)))
+          (authority (match-string 2 url)))
+      (when (doclive--safe-asset-authority-p authority)
+        (concat scheme "://" (downcase authority))))))
+
 (defun doclive--safe-asset-url-p (url)
   "Return non-nil when URL is safe to embed as a browser asset URL."
   (let ((lower-url (and (stringp url) (downcase url))))
@@ -209,15 +225,15 @@ they resolve under the current document's directory."
          (not (string-match-p "[[:cntrl:][:space:]]" url))
          (not (string-match-p "\\\\" url))
          (not (string-prefix-p "//" url))
-         (or (string-match-p "\\`https?://" lower-url)
+         (or (and (string-match-p "\\`https?://" lower-url)
+                  (doclive--absolute-asset-url-origin url))
              (not (string-match-p "\\`[[:alpha:]][[:alnum:]+.-]*:" url))))))
 
 (defun doclive--asset-csp-source (url)
   "Return a CSP source expression for asset URL."
   (cond
    ((not (doclive--safe-asset-url-p url)) nil)
-   ((string-match "\\`\\(https?://[^/?#]+\\)" url)
-    (downcase (match-string 1 url)))
+   ((doclive--absolute-asset-url-origin url))
    (t "'self'")))
 
 (defun doclive--preview-asset-csp-sources ()
