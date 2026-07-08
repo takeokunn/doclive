@@ -613,9 +613,10 @@
              html))))
 
 (ert-deftest doclive-test-preview-html-includes-csp-nonce ()
-  "Preview HTML should nonce the inline runtime script."
+  "Preview HTML should nonce inline runtime assets."
   (let* ((doclive--server-token "abc123_-")
          (html (doclive--preview-html "nonce123_-")))
+    (should (string-match-p (regexp-quote "<style nonce='nonce123_-'>") html))
     (should (string-match-p (regexp-quote "<script nonce='nonce123_-'>") html))
     (should-not (string-match-p (regexp-quote "<script nonce='abc123_-'>") html))
     (should-not (string-match-p (regexp-quote "<script>") html))))
@@ -623,6 +624,7 @@
 (ert-deftest doclive-test-preview-html-omits-unsafe-nonce ()
   "Preview HTML should not embed tokens unsafe for CSP header use."
   (let ((html (doclive--preview-html "bad token\r\n")))
+    (should (string-match-p (regexp-quote "<style>") html))
     (should (string-match-p (regexp-quote "<script>") html))
     (should-not (string-match-p (regexp-quote "bad token") html))))
 
@@ -950,8 +952,12 @@
       (should (string-match-p
                "script-src .*'self'.*http://127\\.0\\.0\\.1:8000.*https://diagrams\\.example\\.invalid.*'nonce-nonce123_-'"
                response))
+      (should (string-match-p
+               "style-src .*'self'.*https://assets\\.example\\.invalid.*'nonce-nonce123_-'"
+               response))
       (should-not (string-match-p (regexp-quote "'nonce-abc123_-'") response))
       (should-not (string-match-p "script-src .*'unsafe-inline'" response))
+      (should-not (string-match-p "style-src .*'unsafe-inline'" response))
       (should (string-match-p "connect-src 'self'\r\n" response)))))
 
 (ert-deftest doclive-test-http-response-csp-rejects-malformed-asset-origins ()

@@ -254,10 +254,11 @@ they resolve under the current document's directory."
 
 (defun doclive--browser-content-security-policy (&optional script-nonce)
   "Return the Content-Security-Policy for the preview page.
-When SCRIPT-NONCE is safe for a CSP nonce, allow the matching inline script."
+When SCRIPT-NONCE is safe for a CSP nonce, allow matching inline assets."
   (let ((asset-sources (mapconcat #'identity
                                   (doclive--preview-asset-csp-sources)
-                                  " ")))
+                                  " "))
+        (nonce (doclive--browser-script-nonce script-nonce)))
     (mapconcat
      #'identity
      (list
@@ -268,10 +269,10 @@ When SCRIPT-NONCE is safe for a CSP nonce, allow the matching inline script."
       "object-src 'none'"
       "img-src 'self' data: blob:"
       (concat "font-src " asset-sources " data:")
-      (concat "style-src " asset-sources " 'unsafe-inline'")
+      (concat "style-src " asset-sources
+              (if nonce (format " 'nonce-%s'" nonce) ""))
       (concat "script-src " asset-sources
-              (let ((nonce (doclive--browser-script-nonce script-nonce)))
-                (if nonce (format " 'nonce-%s'" nonce) "")))
+              (if nonce (format " 'nonce-%s'" nonce) ""))
       "connect-src 'self'")
      "; ")))
 
@@ -627,7 +628,10 @@ inline runtime script when it is safe for CSP nonce use."
    "<title>doclive</title><link rel='icon' href='data:,'>"
    "<link rel='stylesheet' href='" (doclive--preview-asset-url 'highlight-css) "'>"
    "<link rel='stylesheet' href='" (doclive--preview-asset-url 'katex-css) "'>"
-   "<style>"
+   "<style"
+   (let ((nonce (doclive--browser-script-nonce script-nonce)))
+     (if nonce (concat " nonce='" (doclive--escape-html-attribute nonce) "'") ""))
+   ">"
    ":root{--bg:#0d1117;--panel:#111827;--text:#e6edf3;--muted:#8b949e;--border:#30363d;--accent:#58a6ff;}"
    "body[data-theme='light']{--bg:#f6f8fa;--panel:#ffffff;--text:#24292f;--muted:#57606a;--border:#d0d7de;--accent:#0969da;}"
    "*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;}"
