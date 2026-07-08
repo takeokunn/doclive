@@ -764,7 +764,7 @@ SSE client for live-update support."
    "retry: 1200\n\n"))
 
 (defun doclive--authorized-request-p (path)
-  "Return non-nil when PATH contains the current server token."
+  "Return non-nil if PATH has the current server token."
   (let ((token (doclive--query-param path "token")))
     (and (stringp doclive--server-token)
          (stringp token)

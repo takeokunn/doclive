@@ -25,7 +25,12 @@
         {
           default = pkgs.mkShell {
             packages = [
+              pkgs.actionlint
               emacs
+              pkgs.gitleaks
+              pkgs.gnumake
+              pkgs.pre-commit
+              pkgs.zizmor
             ];
 
             shellHook = ''
@@ -40,10 +45,13 @@
               echo "  make test               Run ERT test suite"
               echo "  make lint               Run checkdoc"
               echo "  make package-lint       Run package-lint"
+              echo "  make security           Run secret and GitHub Actions security checks"
+              echo "  pre-commit run --all-files"
               echo "  nix run .#compile       Byte-compile (standalone)"
               echo "  nix run .#test          Run tests (standalone)"
               echo "  nix run .#lint          Run checkdoc (standalone)"
               echo "  nix run .#package-lint  Run package-lint (standalone)"
+              echo "  nix run .#security      Run security checks (standalone)"
               echo "  nix flake check         Run all checks (sandboxed)"
               echo ""
               echo "=== Manual testing ==="
@@ -70,20 +78,36 @@
             epkgs.package-lint
           ]);
           make = "${pkgs.gnumake}/bin/make";
-          mkApp = emacsPkg: target: {
+          mkApp = emacsPkg: target: description: {
             type = "app";
             program = toString (
               pkgs.writeShellScript "doclive-${target}" ''
                 EMACS=${pkgs.lib.getExe emacsPkg} ${make} ${target}
               ''
             );
+            meta.description = description;
+          };
+          mkToolApp = target: tools: description: {
+            type = "app";
+            program = toString (
+              pkgs.writeShellScript "doclive-${target}" ''
+                export PATH=${pkgs.lib.makeBinPath tools}:$PATH
+                ${make} ${target}
+              ''
+            );
+            meta.description = description;
           };
         in
         {
-          compile = mkApp emacs "compile";
-          test = mkApp emacs "test";
-          lint = mkApp emacs "lint";
-          package-lint = mkApp emacsWithPkgLint "package-lint";
+          compile = mkApp emacs "compile" "Byte-compile doclive with warnings as errors";
+          test = mkApp emacs "test" "Run the doclive ERT test suite";
+          lint = mkApp emacs "lint" "Run checkdoc against doclive.el";
+          package-lint = mkApp emacsWithPkgLint "package-lint" "Run package-lint against doclive.el";
+          security = mkToolApp "security" [
+            pkgs.actionlint
+            pkgs.gitleaks
+            pkgs.zizmor
+          ] "Run secret scanning and GitHub Actions security checks";
         }
       );
 
@@ -143,6 +167,22 @@
             env.EMACS = pkgs.lib.getExe emacsWithPkgLint;
             buildPhase = ''
               make package-lint
+            '';
+            installPhase = ''
+              touch $out
+            '';
+          };
+
+          security = pkgs.stdenvNoCC.mkDerivation {
+            name = "doclive-security";
+            inherit src;
+            nativeBuildInputs = [
+              pkgs.actionlint
+              pkgs.gitleaks
+              pkgs.zizmor
+            ];
+            buildPhase = ''
+              make security
             '';
             installPhase = ''
               touch $out

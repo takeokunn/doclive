@@ -4,9 +4,9 @@ EMACS_BATCH = $(EMACS) -Q --batch -L . -L test
 SRC = doclive.el
 TEST = test/doclive-test-helpers.el test/doclive-test.el
 
-.PHONY: check compile test lint package-lint autoloads clean
+.PHONY: check compile test lint package-lint autoloads security clean
 
-check: compile test lint package-lint autoloads
+check: compile test lint package-lint autoloads security
 	git diff --check
 	git diff --exit-code -- doclive-autoloads.el
 
@@ -32,6 +32,11 @@ package-lint:
 
 autoloads:
 	$(EMACS_BATCH) --eval '(let ((output (expand-file-name "doclive-autoloads.el" default-directory))) (if (require (quote loaddefs-gen) nil t) (loaddefs-generate default-directory output) (require (quote autoload)) (let ((generated-autoload-file output)) (update-directory-autoloads default-directory))))'
+
+security:
+	gitleaks detect --no-git --source .
+	actionlint .github/workflows/*.yml
+	zizmor --offline .github/workflows
 
 clean:
 	rm -f *.elc test/*.elc doclive-autoloads.el

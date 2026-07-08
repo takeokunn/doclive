@@ -26,6 +26,7 @@
   - Validation for host, port, debounce delay, and customized browser asset URLs.
   - Browser asset URLs are escaped before HTML embedding and active-content schemes are rejected.
   - Session lifecycle management: buffer-kill cleanup, preview-mode disable cleanup, server-stop token invalidation, Emacs shutdown hook.
+  - Release gate includes byte-compilation, ERT tests, checkdoc, package-lint, autoload generation, whitespace checks, secret scanning, and GitHub Actions security checks.
   - Customizable host, port, browser-open function, and debounce delay.
   - Interactive commands: ~doclive-preview-buffer~ (C-u to restart server),
     ~doclive-preview-file~, ~doclive-stop-server~, ~doclive-reload-page~.

@@ -32,10 +32,18 @@ The flake checks can also be run directly:
 nix flake check
 #+end_src
 
+Optional pre-commit hook execution uses the same local gate:
+
+#+begin_src sh
+pre-commit run --all-files
+#+end_src
+
 * Pull request checklist
 
 - Add or update ERT tests for behavior changes.
 - Run =make check= and include the result in the pull request.
+- Keep GitHub Actions changes passing =actionlint= and =zizmor=.
+- Keep secret scanning passing via =gitleaks detect --no-git --source .=.
 - Keep CDN/browser assets pinned to exact immutable versions.
 - Do not add floating URLs such as =@latest= or unversioned CDN paths.
 - Do not broaden local file access without a security rationale and tests.

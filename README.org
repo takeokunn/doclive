@@ -153,10 +153,19 @@ make test
 make lint
 make package-lint
 make autoloads
+make security
 #+end_src
 
-Nix を使う場合は、compile / test / lint / package-lint を flake 経由でも確認できます。
-PR や release 前には autoload 差分と whitespace も確認するため、最終ゲートとして =make check= も実行してください。
+=make security= は secret scan、GitHub Actions lint、workflow security scan を実行します。
+これらの CLI を個別に導入しない場合は =nix develop= で開発環境に入ってください。
+pre-commit を使う場合は、同じ最終ゲートを hook から実行できます。
+
+#+begin_src sh
+pre-commit run --all-files
+#+end_src
+
+Nix を使う場合は、compile / test / lint / package-lint / security を flake 経由でも確認できます。
+PR や release 前には autoload 生成と whitespace も確認するため、最終ゲートとして =make check= も実行してください。
 
 #+begin_src sh
 nix flake check

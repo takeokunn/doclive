@@ -6,6 +6,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -28,3 +32,6 @@ jobs:
 
       - name: Run release gate
         run: nix develop --command make check
+
+      - name: Run flake checks
+        run: nix flake check
