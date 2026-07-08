@@ -1658,6 +1658,26 @@
       (should deleted)
       (should (string-match-p "403 Forbidden" (mapconcat #'identity sent ""))))))
 
+(ert-deftest doclive-test-create-bootstrap-code-prunes-expired-codes ()
+  "Creating bootstrap codes should prune stale pending entries."
+  (let ((doclive--bootstrap-codes (make-hash-table :test #'equal)))
+    (puthash "expired-code"
+             (list :id "old" :expires (- (float-time) 30))
+             doclive--bootstrap-codes)
+    (puthash "malformed-code"
+             (list :id "broken")
+             doclive--bootstrap-codes)
+    (puthash "fresh-code"
+             (list :id "fresh" :expires (+ (float-time) 30))
+             doclive--bootstrap-codes)
+    (cl-letf (((symbol-function 'doclive--random-token)
+               (lambda () "new-code")))
+      (should (equal (doclive--create-bootstrap-code "abc") "new-code"))
+      (should-not (gethash "expired-code" doclive--bootstrap-codes))
+      (should-not (gethash "malformed-code" doclive--bootstrap-codes))
+      (should (gethash "fresh-code" doclive--bootstrap-codes))
+      (should (gethash "new-code" doclive--bootstrap-codes)))))
+
 (ert-deftest doclive-test-route-request-does-not-consume-ambiguous-bootstrap-query ()
   "Ambiguous preview bootstrap requests should fail before consuming codes."
   (let ((doclive--server-token "secret")

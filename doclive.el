@@ -355,8 +355,23 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
   (or doclive--server-token
       (setq doclive--server-token (doclive--random-token))))
 
+(defun doclive--cleanup-expired-bootstrap-codes ()
+  "Remove expired preview bootstrap codes from the pending table."
+  (let ((expired nil)
+        (now (float-time)))
+    (maphash
+     (lambda (code entry)
+       (unless (and (listp entry)
+                    (numberp (plist-get entry :expires))
+                    (<= now (plist-get entry :expires)))
+         (push code expired)))
+     doclive--bootstrap-codes)
+    (dolist (code expired)
+      (remhash code doclive--bootstrap-codes))))
+
 (defun doclive--create-bootstrap-code (id)
   "Create and return a single-use preview bootstrap code for ID."
+  (doclive--cleanup-expired-bootstrap-codes)
   (let ((code (doclive--random-token)))
     (puthash code
              (list :id id
