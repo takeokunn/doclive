@@ -22,6 +22,14 @@
 (eval-and-compile
   (load "doclive-test-helpers" nil t))
 
+(defvar doclive-test--buffer-id-counter 0
+  "Counter for deterministic test buffer IDs.")
+
+(setq doclive--buffer-id-token-function
+      (lambda ()
+        (format "doclive-test-buffer-id-%d"
+                (cl-incf doclive-test--buffer-id-counter))))
+
 (defun doclive-test--markdown-snapshot-object ()
   "Return a JSON plist for a sample Markdown snapshot."
   (let ((f "/tmp/doclive-json.md"))
@@ -149,15 +157,18 @@
 
 ;; Buffer identity / state
 
-(ert-deftest doclive-test-buffer-id-stable ()
-  "Buffer ID should be stable for same file path."
+(ert-deftest doclive-test-buffer-id-stable-and-opaque ()
+  "Buffer ID should be stable per buffer without deriving from the file path."
   (let ((f "/tmp/doclive-id.md"))
     (with-temp-buffer
       (setq buffer-file-name f)
-      (let ((id1 (doclive--buffer-id (current-buffer)))
-            (id2 (doclive--buffer-id (current-buffer))))
-        (should (stringp id1))
-        (should (string= id1 id2))))))
+      (let ((doclive--buffer-id-token-function
+             (lambda () "opaque-buffer-id")))
+        (let ((id1 (doclive--buffer-id (current-buffer)))
+              (id2 (doclive--buffer-id (current-buffer))))
+          (should (stringp id1))
+          (should (string= id1 id2))
+          (should-not (string= id1 (secure-hash 'sha1 f))))))))
 
 ;; JSON schema
 
@@ -1100,20 +1111,22 @@
         (doclive-port 39123)
         (doclive--server-token nil)
         (doclive--bootstrap-codes (make-hash-table :test #'equal))
+        (doclive--buffer-id-token-function
+         (lambda () "opaque-buffer-id"))
         (tokens '("session-token" "bootstrap-code")))
     (with-temp-buffer
       (cl-letf (((symbol-function 'doclive--random-token)
                  (lambda ()
                    (pop tokens))))
         (let ((url (doclive--preview-url (current-buffer))))
-        (should doclive--server-token)
-        (should-not (string-match-p (regexp-quote "token=") url))
-        (should-not (string-match-p (regexp-quote doclive--server-token) url))
-        (should (string-match-p (regexp-quote "bootstrap=bootstrap-code") url))
-        (should (gethash "bootstrap-code" doclive--bootstrap-codes))
-        (should (string-match-p
-                 (regexp-quote (concat "id=" (url-hexify-string (doclive--buffer-id (current-buffer)))))
-                 url)))))))
+          (should doclive--server-token)
+          (should-not (string-match-p (regexp-quote "token=") url))
+          (should-not (string-match-p (regexp-quote doclive--server-token) url))
+          (should (string-match-p (regexp-quote "bootstrap=bootstrap-code") url))
+          (should (gethash "bootstrap-code" doclive--bootstrap-codes))
+          (should (string-match-p
+                   (regexp-quote (concat "id=" (url-hexify-string "opaque-buffer-id")))
+                   url)))))))
 
 (ert-deftest doclive-test-stop-server-clears-session-state ()
   "Stopping the server should invalidate tokens and bootstrap codes."
@@ -1135,6 +1148,8 @@
         (doclive--bootstrap-codes (make-hash-table :test #'equal))
         (doclive-host "127.0.0.1")
         (doclive-port 39123)
+        (doclive--buffer-id-token-function
+         (lambda () "opaque-buffer-id"))
         (tokens '("session-token" "bootstrap-code"))
         opened-url)
     (with-temp-buffer
@@ -1342,9 +1357,11 @@
     (should (string-match-p "Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()\r\n" response))))
 
 (ert-deftest doclive-test-validated-debounce-seconds ()
-  "Debounce conversion should reject non-positive or non-numeric values."
+  "Debounce conversion should reject non-positive or non-integer values."
   (let ((doclive-change-debounce-ms 250))
     (should (= (doclive--validated-debounce-seconds) 0.25)))
+  (let ((doclive-change-debounce-ms 1.5))
+    (should-error (doclive--validated-debounce-seconds) :type 'user-error))
   (let ((doclive-change-debounce-ms 0))
     (should-error (doclive--validated-debounce-seconds) :type 'user-error))
   (let ((doclive-change-debounce-ms "fast"))

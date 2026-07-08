@@ -187,6 +187,12 @@ they resolve under the current document's directory."
 (defvar doclive--change-timers (make-hash-table :test #'equal)
   "Hash table of debounced change timers keyed by buffer-id.")
 
+(defvar-local doclive--buffer-id-value nil
+  "Opaque preview ID for the current buffer.")
+
+(defvar doclive--buffer-id-token-function #'doclive--random-token
+  "Function used to create opaque preview IDs for buffers.")
+
 (defvar doclive--max-request-bytes 16384
   "Maximum size of a buffered HTTP request header block.")
 
@@ -205,9 +211,11 @@ they resolve under the current document's directory."
   "Static browser hardening headers sent by doclive HTTP responses.")
 
 (defun doclive--buffer-id (buffer)
-  "Return stable ID for BUFFER."
-  (let ((name (with-current-buffer buffer (or buffer-file-name (buffer-name)))))
-    (secure-hash 'sha1 name)))
+  "Return stable opaque preview ID for BUFFER."
+  (with-current-buffer buffer
+    (or doclive--buffer-id-value
+        (setq doclive--buffer-id-value
+              (funcall doclive--buffer-id-token-function)))))
 
 (defun doclive--escape-html (str)
   "Escape STR for safe HTML embedding."
@@ -463,9 +471,9 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
 
 (defun doclive--validated-debounce-seconds ()
   "Return `doclive-change-debounce-ms' as seconds after validation."
-  (unless (and (numberp doclive-change-debounce-ms)
+  (unless (and (integerp doclive-change-debounce-ms)
                (> doclive-change-debounce-ms 0))
-    (user-error "Doclive-change-debounce-ms must be a positive number"))
+    (user-error "Doclive-change-debounce-ms must be a positive integer"))
   (/ (float doclive-change-debounce-ms) 1000.0))
 
 (defun doclive--validate-server-options ()
