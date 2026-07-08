@@ -21,6 +21,9 @@
   - Cookie-protected local preview endpoints for preview, content, link opening, and SSE.
   - Initial preview URLs use short-lived single-use bootstrap codes and redirect to token-free preview URLs.
   - Preview API and SSE requests use an HttpOnly SameSite session cookie instead of query tokens.
+  - Preview buffer IDs exposed to URLs, SSE streams, and JSON payloads are
+    opaque per-buffer random routing identifiers, not local path or buffer-name
+    derivations.
   - Referrer suppression and nosniff headers on local HTTP responses.
   - Inline preview runtime scripts and styles use response-local CSP nonces separate from the session cookie.
   - HTTP request parsing accepts only GET origin-form paths.

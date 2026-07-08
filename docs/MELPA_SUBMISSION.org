@@ -47,5 +47,8 @@ Confirm:
 - The local preview server binds to =127.0.0.1= by default and protects preview
   routes by exchanging a =short-lived single-use bootstrap code= for an
   =HttpOnly= cookie, then redirecting to a =token-free preview URL=.
+- Preview buffer IDs in URLs, SSE streams, and JSON payloads are opaque
+  per-buffer random routing identifiers, not local path or buffer-name
+  derivations.
 - Security-sensitive behavior is documented in =SECURITY.md= and user-visible
   changes are summarized in =NEWS.org=.
