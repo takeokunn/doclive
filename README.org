@@ -124,6 +124,7 @@ doclive はローカルHTTPサーバーを起動し、既定では =127.0.0.1= �
 初回プレビューURLには長寿命の session token ではなく、短命・単回使用の =short-lived single-use bootstrap code= が含まれます。
 有効な bootstrap code で =/preview= に到達すると、サーバーは =HttpOnly= / =SameSite=Strict= の =doclive-token= Cookie を設定し、=token-free preview URL= へ redirect します。
 以後の =/content= / =/open= / =/events= は query token ではなく Cookie で認可します。
+=token= query parameter を含む request は、有効な Cookie があっても拒否します。
 サーバー停止時には session token と未使用の bootstrap code を破棄し、次回起動時に新しい session token を生成します。
 また、バッファで =doclive-preview-mode= を無効化すると、そのバッファの preview entry、SSE client、更新 timer を削除し、以後は配信対象から外します。
 未使用の bootstrap code を含むURLは共有・ログ貼り付け・公開スクリーンショットへの写り込みを避けてください。

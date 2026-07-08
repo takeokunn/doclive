@@ -84,9 +84,11 @@
     (should (string-match-p (regexp-quote "short-lived, single-use bootstrap code") security))
     (should (string-match-p (regexp-quote "redirects to a token-free preview URL") security))
     (should (string-match-p (regexp-quote "instead of a query token") security))
+    (should (string-match-p (regexp-quote "even when the cookie is valid") security))
     (should-not (string-match-p (regexp-quote "Treat preview URLs as bearer secrets") security))
     (should (string-match-p (regexp-quote "short-lived single-use bootstrap code") readme))
     (should (string-match-p (regexp-quote "token-free preview URL") readme))
+    (should (string-match-p (regexp-quote "有効な Cookie があっても拒否します") readme))
     (should-not (string-match-p (regexp-quote "プレビューURLにはセッションごとの =token= が含まれ") readme))
     (should-not (string-match-p (regexp-quote "初回読み込み後、preview runtime はブラウザの表示URLと履歴から =token= query parameter を削除します") readme))
     (should-not (string-match-p (regexp-quote "このURLは bearer secret") readme))
@@ -859,6 +861,15 @@
   (should-not (doclive--query-param "/content?token=secret&x=%ZZ" "token"))
   (should-not (doclive--query-param "/content?token=%ZZ&token=secret" "token")))
 
+(ert-deftest doclive-test-valid-query-rejects-ambiguous-or-token-keys ()
+  "Route-level query validation should reject ambiguous or token-bearing URLs."
+  (should (doclive--valid-query-p "/content?id=abc&path=target.md"))
+  (should-not (doclive--valid-query-p "/content?id=abc&id=def"))
+  (should-not (doclive--valid-query-p "/open?path=one.md&path=two.md"))
+  (should-not (doclive--valid-query-p "/preview?token=secret"))
+  (should-not (doclive--valid-query-p "/preview?Token=secret"))
+  (should-not (doclive--valid-query-p "/preview?%74oken=secret")))
+
 (ert-deftest doclive-test-random-token-uses-openssl-rand ()
   "Token generation should prefer OS-backed random bytes when available."
   (let ((called nil))
@@ -1279,6 +1290,27 @@
       (doclive--route-request 'fake-proc "/preview?id=abc&bootstrap=bootstrap-code")
       (should deleted)
       (should (string-match-p "403 Forbidden" (mapconcat #'identity sent ""))))))
+
+(ert-deftest doclive-test-route-request-does-not-consume-ambiguous-bootstrap-query ()
+  "Ambiguous preview bootstrap requests should fail before consuming codes."
+  (let ((doclive--server-token "secret")
+        (doclive--bootstrap-codes (make-hash-table :test #'equal))
+        (sent nil)
+        (deleted nil))
+    (puthash "bootstrap-code"
+             (list :id "abc" :expires (+ (float-time) 30))
+             doclive--bootstrap-codes)
+    (cl-letf (((symbol-function 'process-send-string)
+               (lambda (_proc string)
+                 (push string sent)))
+              ((symbol-function 'delete-process)
+               (lambda (_proc)
+                 (setq deleted t))))
+      (doclive--route-request 'fake-proc "/preview?id=abc&id=def&bootstrap=bootstrap-code")
+      (let ((response (mapconcat #'identity sent "")))
+        (should deleted)
+        (should (string-match-p "403 Forbidden" response))
+        (should (gethash "bootstrap-code" doclive--bootstrap-codes))))))
 
 (ert-deftest doclive-test-route-request-allows-cookie-authorized-content ()
   "Protected content routes should accept the HttpOnly session cookie."

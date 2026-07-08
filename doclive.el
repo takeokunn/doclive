@@ -860,12 +860,14 @@ runtime script and style when it is safe for CSP nonce use."
                         found decoded-value))))))))))
 
 (defun doclive--valid-query-p (path)
-  "Return non-nil when PATH has safe query syntax and no token parameter."
+  "Return non-nil when PATH has safe, unambiguous query syntax."
   (or (not (and path (string-match "\\?" path)))
       (let ((pairs (split-string (substring path (1+ (match-beginning 0))) "&" t))
+            (seen-keys (make-hash-table :test #'equal))
             invalid
+            duplicate
             token-parameter)
-        (dolist (p pairs (and (not invalid) (not token-parameter)))
+        (dolist (p pairs (and (not invalid) (not duplicate) (not token-parameter)))
           (if (not (string-match "=" p))
               (unless (doclive--decode-query-component p)
                 (setq invalid t))
@@ -877,8 +879,12 @@ runtime script and style when it is safe for CSP nonce use."
                ((or (null decoded-key)
                     (null (doclive--decode-query-component raw-value)))
                 (setq invalid t))
-               ((string= decoded-key "token")
-                (setq token-parameter t)))))))))
+               ((gethash decoded-key seen-keys)
+                (setq duplicate t))
+               ((string= (downcase decoded-key) "token")
+                (setq token-parameter t))
+               (t
+                (puthash decoded-key t seen-keys)))))))))
 
 (defun doclive--parse-request-headers (request)
   "Parse HTTP REQUEST headers into a case-folded alist."
