@@ -716,9 +716,26 @@
 
 (ert-deftest doclive-test-random-token-falls-back-when-openssl-unavailable ()
   "Token generation should keep working without openssl."
-  (cl-letf (((symbol-function 'executable-find) (lambda (_program) nil)))
+  (cl-letf (((symbol-function 'executable-find) (lambda (_program) nil))
+            ((symbol-function 'file-readable-p)
+             (lambda (file) (not (equal file "/dev/urandom")))))
     (let ((token (doclive--random-token)))
       (should (string-match-p "\\`[0-9a-f]\\{64\\}\\'" token)))))
+
+(ert-deftest doclive-test-random-token-uses-dev-urandom-without-openssl ()
+  "Token generation should use /dev/urandom when openssl is unavailable."
+  (let ((bytes (apply #'unibyte-string (number-sequence 0 31))))
+    (cl-letf (((symbol-function 'executable-find) (lambda (_program) nil))
+              ((symbol-function 'file-readable-p)
+               (lambda (file) (equal file "/dev/urandom")))
+              ((symbol-function 'insert-file-contents-literally)
+               (lambda (file &optional _visit _beg _end _replace)
+                 (should (equal file "/dev/urandom"))
+                 (insert bytes)
+                 (list file (length bytes)))))
+      (should
+       (equal (doclive--random-token)
+              "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")))))
 
 (ert-deftest doclive-test-random-token-falls-back-when-openssl-errors ()
   "Token generation should survive openssl invocation failures."
@@ -726,7 +743,9 @@
              (lambda (program) (and (equal program "openssl") "/bin/openssl")))
             ((symbol-function 'process-file)
              (lambda (&rest _args)
-               (error "openssl failed"))))
+               (error "openssl failed")))
+            ((symbol-function 'file-readable-p)
+             (lambda (file) (not (equal file "/dev/urandom")))))
     (let ((token (doclive--random-token)))
       (should (string-match-p "\\`[0-9a-f]\\{64\\}\\'" token)))))
 
@@ -934,6 +953,31 @@
           (should-error (doclive-preview-file dir) :type 'user-error))
       (when (file-directory-p dir)
         (delete-directory dir)))))
+
+(ert-deftest doclive-test-preview-file-disables-local-eval ()
+  "Preview command should disable local variables and eval while opening FILE."
+  (let ((file (make-temp-file "doclive-preview-local-vars-" nil ".md"))
+        (seen-enable-local-variables :unset)
+        (seen-enable-local-eval :unset)
+        (opened nil))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "# Local Vars\n"))
+          (cl-letf (((symbol-function 'find-file)
+                     (lambda (path &rest _args)
+                       (setq seen-enable-local-variables enable-local-variables
+                             seen-enable-local-eval enable-local-eval
+                             opened path)))
+                    ((symbol-function 'doclive-preview-buffer)
+                     (lambda (&rest _args)
+                       nil)))
+            (doclive-preview-file file)
+            (should (equal opened file))
+            (should (equal seen-enable-local-variables nil))
+            (should (equal seen-enable-local-eval nil))))
+      (when (file-exists-p file)
+        (delete-file file)))))
 
 (ert-deftest doclive-test-route-request-rejects-invalid-events-id ()
   "SSE route should reject missing or unknown buffer ids."

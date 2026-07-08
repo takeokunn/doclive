@@ -258,6 +258,23 @@ they resolve under the current document's directory."
       (error "Unsafe doclive preview asset URL for %S" key))
     (doclive--escape-html-attribute url)))
 
+(defun doclive--hex-encode-string (string)
+  "Return lowercase hexadecimal encoding of unibyte STRING."
+  (mapconcat (lambda (byte) (format "%02x" byte)) string ""))
+
+(defun doclive--random-token-from-urandom ()
+  "Return a 32-byte hex token from /dev/urandom when available."
+  (when (file-readable-p "/dev/urandom")
+    (condition-case nil
+        (with-temp-buffer
+          (set-buffer-multibyte nil)
+          (let ((coding-system-for-read 'binary))
+            (insert-file-contents-literally "/dev/urandom" nil 0 32))
+          (let ((bytes (buffer-string)))
+            (when (= (length bytes) 32)
+              (doclive--hex-encode-string bytes))))
+      (error nil))))
+
 (defun doclive--random-token ()
   "Return a high-entropy token string for local bearer authentication."
   (or (let ((openssl (executable-find "openssl")))
@@ -272,6 +289,7 @@ they resolve under the current document's directory."
                     (when (string-match-p "\\`[0-9a-f]\\{64\\}\\'" token)
                       token))))
             (error nil))))
+      (doclive--random-token-from-urandom)
       (secure-hash
        'sha256
        (format "%S:%S:%S:%S"
@@ -973,7 +991,9 @@ the preview."
   (unless (and (file-regular-p file)
                (file-readable-p file))
     (user-error "Doclive can preview only readable regular files"))
-  (find-file file)
+  (let ((enable-local-variables nil)
+        (enable-local-eval nil))
+    (find-file file))
   (doclive-preview-buffer))
 
 ;;;###autoload
