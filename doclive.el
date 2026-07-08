@@ -195,11 +195,11 @@ they resolve under the current document's directory."
   "Escape STR for safe quoted HTML attribute embedding."
   (replace-regexp-in-string "'" "&#39;" (doclive--escape-html str) t t))
 
-(defun doclive--browser-script-nonce ()
-  "Return the current server token when safe to use as a CSP nonce."
-  (when (and (stringp doclive--server-token)
-             (string-match-p "\\`[[:alnum:]+/_-]+\\'" doclive--server-token))
-    doclive--server-token))
+(defun doclive--browser-script-nonce (nonce)
+  "Return NONCE when safe to use as a CSP nonce."
+  (when (and (stringp nonce)
+             (string-match-p "\\`[[:alnum:]+/_-]+\\'" nonce))
+    nonce))
 
 (defun doclive--safe-asset-url-p (url)
   "Return non-nil when URL is safe to embed as a browser asset URL."
@@ -232,8 +232,9 @@ they resolve under the current document's directory."
         (push source sources)))
     (nreverse sources)))
 
-(defun doclive--browser-content-security-policy ()
-  "Return the Content-Security-Policy for the preview page."
+(defun doclive--browser-content-security-policy (&optional script-nonce)
+  "Return the Content-Security-Policy for the preview page.
+When SCRIPT-NONCE is safe for a CSP nonce, allow the matching inline script."
   (let ((asset-sources (mapconcat #'identity
                                   (doclive--preview-asset-csp-sources)
                                   " ")))
@@ -249,15 +250,16 @@ they resolve under the current document's directory."
       (concat "font-src " asset-sources " data:")
       (concat "style-src " asset-sources " 'unsafe-inline'")
       (concat "script-src " asset-sources
-              (let ((nonce (doclive--browser-script-nonce)))
+              (let ((nonce (doclive--browser-script-nonce script-nonce)))
                 (if nonce (format " 'nonce-%s'" nonce) "")))
       "connect-src 'self'")
      "; ")))
 
-(defun doclive--browser-security-headers ()
-  "Return browser hardening headers sent by doclive HTTP responses."
+(defun doclive--browser-security-headers (&optional script-nonce)
+  "Return browser hardening headers sent by doclive HTTP responses.
+SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
   (append doclive--browser-security-base-headers
-          `(("Content-Security-Policy" . ,(doclive--browser-content-security-policy)))))
+          `(("Content-Security-Policy" . ,(doclive--browser-content-security-policy script-nonce)))))
 
 (defun doclive--preview-asset-url (key)
   "Return the escaped preview asset URL for KEY."
@@ -554,34 +556,37 @@ they resolve under the current document's directory."
                          (buffer_id . ,new-id)
                          (name . ,(plist-get new-entry :name)))))))))
 
-(defun doclive--http-response (status content-type body)
-  "Build HTTP response from STATUS CONTENT-TYPE BODY."
+(defun doclive--http-response (status content-type body &optional script-nonce)
+  "Build HTTP response from STATUS CONTENT-TYPE BODY.
+SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
   (concat
    (format "HTTP/1.1 %s\r\n" status)
    "Connection: close\r\n"
    (format "Content-Type: %s; charset=utf-8\r\n" content-type)
    (format "Content-Length: %d\r\n" (string-bytes body))
    "Cache-Control: no-store\r\n"
-   (doclive--browser-security-header-lines)
+   (doclive--browser-security-header-lines script-nonce)
    "\r\n"
    body))
 
-(defun doclive--browser-security-header-lines ()
-  "Return HTTP header lines for browser-side response hardening."
+(defun doclive--browser-security-header-lines (&optional script-nonce)
+  "Return HTTP header lines for browser-side response hardening.
+SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
   (concat
    (mapconcat
     (lambda (header)
       (format "%s: %s" (car header) (cdr header)))
-    (doclive--browser-security-headers)
+    (doclive--browser-security-headers script-nonce)
     "\r\n")
    "\r\n"))
 
-(defun doclive--preview-html ()
+(defun doclive--preview-html (&optional script-nonce)
   "Return the complete self-contained preview HTML page.
 The page embeds marked.js for Markdown rendering, highlight.js for
 syntax highlighting, KaTeX for math typesetting with comprehensive
 LaTeX environment support, Mermaid.js for diagram rendering, and an
-SSE client for live-update support."
+SSE client for live-update support.  SCRIPT-NONCE is applied to the
+inline runtime script when it is safe for CSP nonce use."
   (concat
    "<!doctype html><html><head><meta charset='utf-8'>"
    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -643,10 +648,11 @@ SSE client for live-update support."
    "<script src='" (doclive--preview-asset-url 'katex-auto-render-script) "'></script>"
    "<script src='" (doclive--preview-asset-url 'mermaid-script) "'></script>"
    "<script"
-   (let ((nonce (doclive--browser-script-nonce)))
+   (let ((nonce (doclive--browser-script-nonce script-nonce)))
      (if nonce (concat " nonce='" (doclive--escape-html-attribute nonce) "'") ""))
    ">"
    "const qs=new URLSearchParams(location.search); let currentId=qs.get('id'); const currentToken=qs.get('token')||'';"
+   "function scrubTokenFromLocation(){if(!qs.has('token')) return; const clean=new URLSearchParams(qs); clean.delete('token'); const q=clean.toString(); history.replaceState({id:currentId},'',q?'?'+q:location.pathname);}"
    "const statusEl=document.getElementById('status'); const mdEl=document.getElementById('md'); const tocEl=document.getElementById('toc');"
    "const searchEl=document.getElementById('search'); const pinEl=document.getElementById('pin'); const chipsEl=document.getElementById('chips');"
    "const themeEl=document.getElementById('theme'); const dotEl=document.getElementById('dot');"
@@ -717,7 +723,7 @@ SSE client for live-update support."
    "function updateNavButtons(){document.getElementById('back').disabled=navIndex<=0; document.getElementById('forward').disabled=navIndex<0||navIndex>=navStack.length-1;}"
    "let es=null;"
    "async function fetchContent(){const r=await fetch(authedPath('/content?id='+encodeURIComponent(currentId)),{cache:'no-store'}); return r.json();}"
-   "async function applyContent(j){if(!j.ok){statusEl.textContent=j.error||'not found'; dotEl.className='dot dot-disconnected'; return;} statusEl.textContent='live • rev '+j.revision+' • '+(j.name||''); dotEl.className='dot'; if(j.revision===lastRev) return; lastRev=j.revision; const kind=j.contentKind||'markdown'; let html=''; if(kind==='org-html'){html=j.html||'';}else{const parsed=parseFrontmatter(j.markdown||''); html=renderFrontmatter(parsed.front)+marked.parse(parsed.body||'');} html=sanitizeHtml(html); mdEl.setAttribute('data-content-kind',kind); mdEl.innerHTML=html; wireCopy(); renderMath(); await renderMermaid(); buildToc(); mdEl.setAttribute('data-base-html',mdEl.innerHTML); applyHighlights(); applyZoom(); pushNav(currentId,j.name||''); history.replaceState({id:currentId},'',`?id=${encodeURIComponent(currentId)}&token=${encodeURIComponent(currentToken)}`);}"
+   "async function applyContent(j){if(!j.ok){statusEl.textContent=j.error||'not found'; dotEl.className='dot dot-disconnected'; return;} statusEl.textContent='live • rev '+j.revision+' • '+(j.name||''); dotEl.className='dot'; if(j.revision===lastRev) return; lastRev=j.revision; const kind=j.contentKind||'markdown'; let html=''; if(kind==='org-html'){html=j.html||'';}else{const parsed=parseFrontmatter(j.markdown||''); html=renderFrontmatter(parsed.front)+marked.parse(parsed.body||'');} html=sanitizeHtml(html); mdEl.setAttribute('data-content-kind',kind); mdEl.innerHTML=html; wireCopy(); renderMath(); await renderMermaid(); buildToc(); mdEl.setAttribute('data-base-html',mdEl.innerHTML); applyHighlights(); applyZoom(); pushNav(currentId,j.name||''); history.replaceState({id:currentId},'',`?id=${encodeURIComponent(currentId)}`);}"
    "async function openLinkedDocument(href){try{const r=await fetch(authedPath('/open?id='+encodeURIComponent(currentId)+'&path='+encodeURIComponent(href)),{cache:'no-store'}); const j=await r.json(); if(!j.ok){statusEl.textContent=j.error||'open failed'; return;} currentId=j.buffer_id; lastRev=-1; connectSSE(); const c=await fetchContent(); await applyContent(c);}catch(e){statusEl.textContent='open failed';}}"
    "function wireDocumentLinkNavigation(){mdEl.querySelectorAll('a[href]').forEach(a=>{const href=a.getAttribute('href')||''; if(/^[a-zA-Z][a-zA-Z0-9+.-]*:/i.test(href)||href.startsWith('#')) return; if(!/\\.(md|org|html)($|#|\\?)/i.test(href)) return; a.addEventListener('click',ev=>{ev.preventDefault(); openLinkedDocument(href);});});}"
    "function connectSSE(){if(!currentId){statusEl.textContent='missing id'; dotEl.className='dot dot-disconnected'; return;} if(es){es.close(); es=null;} es=new EventSource(authedPath('/events?id='+encodeURIComponent(currentId))); es.addEventListener('open',()=>{statusEl.textContent='connected'; dotEl.className='dot';}); es.addEventListener('revision',async()=>{try{const j=await fetchContent(); await applyContent(j);}catch(e){statusEl.textContent='sync error';}}); es.onerror=()=>{statusEl.textContent='reconnecting…'; dotEl.className='dot dot-disconnected';};}"
@@ -730,6 +736,7 @@ SSE client for live-update support."
    "document.getElementById('back').addEventListener('click',async()=>{if(navIndex<=0) return; navIndex--; currentId=navStack[navIndex].id; updateNavButtons(); lastRev=-1; connectSSE(); const j=await fetchContent(); await applyContent(j);});"
    "document.getElementById('forward').addEventListener('click',async()=>{if(navIndex>=navStack.length-1) return; navIndex++; currentId=navStack[navIndex].id; updateNavButtons(); lastRev=-1; connectSSE(); const j=await fetchContent(); await applyContent(j);});"
    "applyTheme(localStorage.getItem('doclive-theme'));"
+   "scrubTokenFromLocation();"
    "(async()=>{try{const j=await fetchContent(); await applyContent(j);}catch(e){statusEl.textContent='initial load failed'; dotEl.className='dot dot-disconnected';} connectSSE();})();"
    "</script></body></html>"))
 
@@ -783,8 +790,12 @@ SSE client for live-update support."
   (cond
    ((or (doclive--route-matches-p path "/") (doclive--route-matches-p path "/preview"))
     (if (doclive--authorized-request-p path)
-        (progn
-          (process-send-string proc (doclive--http-response "200 OK" "text/html" (doclive--preview-html)))
+        (let ((script-nonce (doclive--random-token)))
+          (process-send-string
+           proc
+           (doclive--http-response "200 OK" "text/html"
+                                    (doclive--preview-html script-nonce)
+                                    script-nonce))
           (delete-process proc))
       (doclive--send-forbidden proc)))
    ((doclive--route-matches-p path "/content")

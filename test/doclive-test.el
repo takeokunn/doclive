@@ -582,14 +582,14 @@
 (ert-deftest doclive-test-preview-html-includes-csp-nonce ()
   "Preview HTML should nonce the inline runtime script."
   (let* ((doclive--server-token "abc123_-")
-         (html (doclive--preview-html)))
-    (should (string-match-p (regexp-quote "<script nonce='abc123_-'>") html))
+         (html (doclive--preview-html "nonce123_-")))
+    (should (string-match-p (regexp-quote "<script nonce='nonce123_-'>") html))
+    (should-not (string-match-p (regexp-quote "<script nonce='abc123_-'>") html))
     (should-not (string-match-p (regexp-quote "<script>") html))))
 
 (ert-deftest doclive-test-preview-html-omits-unsafe-nonce ()
   "Preview HTML should not embed tokens unsafe for CSP header use."
-  (let* ((doclive--server-token "bad token\r\n")
-         (html (doclive--preview-html)))
+  (let ((html (doclive--preview-html "bad token\r\n")))
     (should (string-match-p (regexp-quote "<script>") html))
     (should-not (string-match-p (regexp-quote "bad token") html))))
 
@@ -687,7 +687,21 @@
              (regexp-quote "new EventSource(authedPath('/events?id='+encodeURIComponent(currentId)))")
              html))
     (should (string-match-p
-             (regexp-quote "history.replaceState({id:currentId},'',`?id=${encodeURIComponent(currentId)}&token=${encodeURIComponent(currentToken)}`)")
+             (regexp-quote "history.replaceState({id:currentId},'',`?id=${encodeURIComponent(currentId)}`)")
+             html))
+    (should-not
+     (string-match-p
+      (regexp-quote "history.replaceState({id:currentId},'',`?id=${encodeURIComponent(currentId)}&token=${encodeURIComponent(currentToken)}`)")
+      html))))
+
+(ert-deftest doclive-test-preview-html-scrubs-token-from-history ()
+  "Preview HTML should remove bearer tokens from the visible browser URL."
+  (let ((html (doclive--preview-html)))
+    (should (string-match-p "function scrubTokenFromLocation" html))
+    (should (string-match-p (regexp-quote "clean.delete('token')") html))
+    (should (string-match-p (regexp-quote "scrubTokenFromLocation();") html))
+    (should (string-match-p
+             (regexp-quote "history.replaceState({id:currentId},'',q?'?'+q:location.pathname)")
              html))))
 
 (ert-deftest doclive-test-example-links ()
@@ -861,7 +875,7 @@
            (katex-auto-render-script . "/vendor/auto-render.js")
            (mermaid-script . "https://diagrams.example.invalid/mermaid.js")))
         (doclive--server-token "abc123_-"))
-    (let ((response (doclive--http-response "200 OK" "text/plain" "body")))
+    (let ((response (doclive--http-response "200 OK" "text/plain" "body" "nonce123_-")))
       (should (string-match-p
                (regexp-quote "https://assets.example.invalid")
                response))
@@ -872,8 +886,9 @@
                (regexp-quote "https://diagrams.example.invalid")
                response))
       (should (string-match-p
-               "script-src .*'self'.*http://127\\.0\\.0\\.1:8000.*https://diagrams\\.example\\.invalid.*'nonce-abc123_-'"
+               "script-src .*'self'.*http://127\\.0\\.0\\.1:8000.*https://diagrams\\.example\\.invalid.*'nonce-nonce123_-'"
                response))
+      (should-not (string-match-p (regexp-quote "'nonce-abc123_-'") response))
       (should-not (string-match-p "script-src .*'unsafe-inline'" response))
       (should (string-match-p "connect-src 'self'\r\n" response)))))
 
@@ -972,7 +987,7 @@
         (sent nil)
         (deleted nil))
     (cl-letf (((symbol-function 'doclive--preview-html)
-               (lambda () "preview"))
+               (lambda (&optional _script-nonce) "preview"))
               ((symbol-function 'process-send-string)
                (lambda (_proc string)
                  (push string sent)))
@@ -983,6 +998,28 @@
       (should deleted)
       (should (string-match-p "200 OK" (mapconcat #'identity sent "")))
       (should (string-match-p "preview" (mapconcat #'identity sent ""))))))
+
+(ert-deftest doclive-test-route-request-uses-response-nonce-not-token ()
+  "Preview responses should not reuse the bearer token as the CSP nonce."
+  (let ((doclive--server-token "secret")
+        (sent nil)
+        (deleted nil))
+    (cl-letf (((symbol-function 'doclive--random-token)
+               (lambda () "route-nonce"))
+              ((symbol-function 'process-send-string)
+               (lambda (_proc string)
+                 (push string sent)))
+              ((symbol-function 'delete-process)
+               (lambda (_proc)
+                 (setq deleted t))))
+      (doclive--route-request 'fake-proc "/preview?token=secret")
+      (let ((response (mapconcat #'identity sent "")))
+        (should deleted)
+        (should (string-match-p "200 OK" response))
+        (should (string-match-p (regexp-quote "<script nonce='route-nonce'>") response))
+        (should (string-match-p (regexp-quote "'nonce-route-nonce'") response))
+        (should-not (string-match-p (regexp-quote "<script nonce='secret'>") response))
+        (should-not (string-match-p (regexp-quote "'nonce-secret'") response))))))
 
 (ert-deftest doclive-test-preview-file-rejects-unsupported-extension ()
   "Preview command should reject files outside the supported document set."
