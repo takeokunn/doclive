@@ -661,7 +661,9 @@
     (should (string-match-p (regexp-quote "querySelectorAll('script,iframe,object,embed,link,meta,base')") html))
     (should (string-match-p (regexp-quote "/^on/i") html))
     (should (string-match-p (regexp-quote "/^[a-z][a-z0-9+.-]*:/") html))
-    (should (string-match-p (regexp-quote "/^(https?:|mailto:)/") html))
+    (should (string-match-p
+             (regexp-quote "allowMailto&&folded.startsWith('mailto:')")
+             html))
     (should (string-match-p "xlink:href" html))
     (should (string-match-p (regexp-quote "lower==='style'") html))
     (should (string-match-p (regexp-quote "lower==='srcset'") html))
@@ -685,13 +687,20 @@
              html))
     (should (string-match-p (regexp-quote "lower==='ping'") html))
     (should (string-match-p
+             (regexp-quote "const allowMailto=/^(href|xlink:href)$/i.test(name);")
+             html))
+    (should (string-match-p
+             (regexp-quote "sanitizeUrlValue(attr.value||'',allowMailto)")
+             html))
+    (should (string-match-p
              (regexp-quote
               "href.indexOf(String.fromCharCode(92))!==-1")
              html))
     (should (string-match-p
              (regexp-quote
-              "if(/^[a-z][a-z0-9+.-]*:/.test(folded)&&!/^(https?:|mailto:)/.test(folded)) return '';")
-             html))))
+              "if(/^[a-z][a-z0-9+.-]*:/.test(folded)&&!(/^https?:/.test(folded)||(allowMailto&&folded.startsWith('mailto:')))) return '';")
+             html))
+    (should-not (string-match-p (regexp-quote "/^(https?:|mailto:)/") html))))
 
 (ert-deftest doclive-test-preview-html-includes-csp-nonce ()
   "Preview HTML should nonce inline runtime assets."
