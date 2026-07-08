@@ -410,6 +410,31 @@
          (when (buffer-live-p buf)
            (kill-buffer buf)))))))
 
+(ert-deftest doclive-test-linked-document-rejects-symlink-escape ()
+  "Resolver should reject symlinks escaping the source directory by default."
+  (doclive-test--with-temp-linked-files
+   '(("docs/source.md" . "# Source\n")
+     ("secret.md" . "# Secret\n"))
+   (lambda (dir)
+     (let* ((docs-dir (expand-file-name "docs" dir))
+            (target (expand-file-name "secret.md" dir))
+            (link (expand-file-name "linked.md" docs-dir))
+            (buf (find-file-noselect (expand-file-name "docs/source.md" dir)))
+            (entry nil))
+       (unwind-protect
+           (progn
+             (condition-case nil
+                 (make-symbolic-link target link)
+               (file-error (ert-skip "Symlinks are not available")))
+             (setq entry (doclive--snapshot-buffer buf))
+             (should-not (doclive--resolve-linked-document entry "linked.md"))
+             (let ((doclive-allow-linked-document-parent-directory t))
+               (should (equal (file-truename
+                               (doclive--resolve-linked-document entry "linked.md"))
+                              (file-truename target)))))
+         (when (buffer-live-p buf)
+           (kill-buffer buf)))))))
+
 (ert-deftest doclive-test-supported-document-file-p ()
   "Supported document check should allow only Markdown and Org files."
   (should (doclive--supported-document-file-p "README.md"))
