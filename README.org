@@ -123,6 +123,7 @@ M-x doclive-reload-page
 doclive はローカルHTTPサーバーを起動し、既定では =127.0.0.1= に bind します。
 初回プレビューURLには長寿命の session token ではなく、短命・単回使用の =short-lived single-use bootstrap code= が含まれます。
 有効な bootstrap code で =/preview= に到達すると、サーバーは =HttpOnly= / =SameSite=Strict= の =doclive-token= Cookie を設定し、=token-free preview URL= へ redirect します。
+この Cookie は既定の plain HTTP / loopback-only サーバーで動作させるため =Secure= 属性を付けません。非loopback host を明示的に許可する場合は、そのネットワーク経路を信頼済みとして扱うか、必要に応じて外側で transport protection を用意してください。
 以後の =/content= / =/open= / =/events= は query token ではなく Cookie で認可します。
 =token= query parameter を含む request は、有効な Cookie があっても拒否します。
 URL / SSE / JSON payload に出る buffer id は、buffer ごとの opaque random routing identifier です。
