@@ -517,10 +517,13 @@
                  "/vendor\\marked.js"
                  "https://example.invalid/marked.js\nbad"
                  "https://example.invalid;script-src/marked.js"
-                 "https://example.invalid:bad/marked.js"
-                 "https://-example.invalid/marked.js"
-                 "https://example-.invalid/marked.js"
-                 "https://example..invalid/marked.js"
+                  "https://example.invalid:bad/marked.js"
+                  "https://example.invalid:0/marked.js"
+                  "https://example.invalid:65536/marked.js"
+                  "http://[::1]:70000/marked.js"
+                  "https://-example.invalid/marked.js"
+                  "https://example-.invalid/marked.js"
+                  "https://example..invalid/marked.js"
                  "https://user@example.invalid/marked.js"
                  "https:///marked.js"))
     (should-not (doclive--safe-asset-url-p url)))
@@ -820,12 +823,11 @@
       (should (equal called '("/bin/openssl" nil t nil ("rand" "-hex" "32")))))))
 
 (ert-deftest doclive-test-random-token-falls-back-when-openssl-unavailable ()
-  "Token generation should keep working without openssl."
+  "Token generation should fail closed without a secure random source."
   (cl-letf (((symbol-function 'executable-find) (lambda (_program) nil))
             ((symbol-function 'file-readable-p)
-             (lambda (file) (not (equal file "/dev/urandom")))))
-    (let ((token (doclive--random-token)))
-      (should (string-match-p "\\`[0-9a-f]\\{64\\}\\'" token)))))
+              (lambda (file) (not (equal file "/dev/urandom")))))
+    (should-error (doclive--random-token) :type 'user-error)))
 
 (ert-deftest doclive-test-random-token-uses-dev-urandom-without-openssl ()
   "Token generation should use /dev/urandom when openssl is unavailable."
@@ -843,7 +845,7 @@
               "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")))))
 
 (ert-deftest doclive-test-random-token-falls-back-when-openssl-errors ()
-  "Token generation should survive openssl invocation failures."
+  "Token generation should fail closed when all secure sources fail."
   (cl-letf (((symbol-function 'executable-find)
              (lambda (program) (and (equal program "openssl") "/bin/openssl")))
             ((symbol-function 'process-file)
@@ -851,8 +853,7 @@
                (error "openssl failed")))
             ((symbol-function 'file-readable-p)
              (lambda (file) (not (equal file "/dev/urandom")))))
-    (let ((token (doclive--random-token)))
-      (should (string-match-p "\\`[0-9a-f]\\{64\\}\\'" token)))))
+    (should-error (doclive--random-token) :type 'user-error)))
 
 (ert-deftest doclive-test-ensure-server-token-reuses-current-token ()
   "Server token generation should happen once per session."
@@ -969,12 +970,12 @@
   "CSP should not include malformed asset authorities."
   (let ((doclive-preview-asset-urls
          '((highlight-css . "https://assets.example.invalid;style-src/highlight.css")
-           (katex-css . "https://assets.example.invalid:bad/katex.css")
-           (marked-script . "https://user@assets.example.invalid/marked.js")
-           (highlight-script . "https:///highlight.js")
-           (katex-script . "https://assets-.example.invalid/katex.js")
-           (katex-auto-render-script . "/vendor/auto-render.js")
-           (mermaid-script . "https://diagrams.example.invalid/mermaid.js"))))
+            (katex-css . "https://assets.example.invalid:bad/katex.css")
+            (marked-script . "https://user@assets.example.invalid/marked.js")
+            (highlight-script . "https:///highlight.js")
+            (katex-script . "https://assets-.example.invalid/katex.js")
+            (katex-auto-render-script . "https://assets.example.invalid:70000/auto-render.js")
+            (mermaid-script . "https://diagrams.example.invalid/mermaid.js"))))
     (let ((response (doclive--http-response "200 OK" "text/plain" "body" "nonce123_-")))
       (should-not (string-match-p "assets\\.example\\.invalid" response))
       (should (string-match-p

@@ -202,12 +202,22 @@ they resolve under the current document's directory."
              (string-match-p "\\`[[:alnum:]+/_-]+\\'" nonce))
     nonce))
 
+(defun doclive--safe-asset-port-p (port)
+  "Return non-nil when PORT is nil or a valid TCP port string."
+  (or (null port)
+      (and (string-match-p "\\`[0-9]+\\'" port)
+           (let ((number (string-to-number port)))
+             (and (<= 1 number)
+                  (<= number 65535))))))
+
 (defun doclive--safe-asset-authority-p (authority)
   "Return non-nil when AUTHORITY is safe as an HTTP asset authority."
   (and (stringp authority)
        (not (string-empty-p authority))
-       (or (string-match-p "\\`\\[[0-9a-fA-F:.]+\\]\\(?::[0-9]+\\)?\\'" authority)
-           (and (string-match "\\`\\([[:alnum:].-]+\\)\\(?::[0-9]+\\)?\\'" authority)
+       (or (and (string-match "\\`\\[[0-9a-fA-F:.]+\\]\\(?::\\([0-9]+\\)\\)?\\'" authority)
+                (doclive--safe-asset-port-p (match-string 1 authority)))
+           (and (string-match "\\`\\([[:alnum:].-]+\\)\\(?::\\([0-9]+\\)\\)?\\'" authority)
+                (doclive--safe-asset-port-p (match-string 2 authority))
                 (cl-every
                  (lambda (label)
                    (string-match-p "\\`[[:alnum:]]\\(?:[[:alnum:]-]*[[:alnum:]]\\)?\\'" label))
@@ -324,13 +334,7 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
                       token))))
             (error nil))))
       (doclive--random-token-from-urandom)
-      (secure-hash
-       'sha256
-       (format "%S:%S:%S:%S"
-               (random t)
-               (current-time)
-               (emacs-pid)
-               (user-uid)))))
+      (user-error "Doclive requires openssl rand or /dev/urandom for secure tokens")))
 
 (defun doclive--ensure-server-token ()
   "Return the session token for the local preview server."
