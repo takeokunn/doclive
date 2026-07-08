@@ -784,15 +784,36 @@
       html))))
 
 (ert-deftest doclive-test-preview-html-scrubs-sensitive-query-from-history ()
-  "Preview HTML should remove bootstrap leftovers from the visible browser URL."
+  "Preview HTML should remove sensitive query variants from browser history."
   (let ((html (doclive--preview-html)))
     (should (string-match-p "function scrubSensitiveQueryFromLocation" html))
-    (should (string-match-p (regexp-quote "clean.delete('bootstrap')") html))
-    (should (string-match-p (regexp-quote "clean.delete('token')") html))
+    (should (string-match-p
+             (regexp-quote
+              "const lower=(key||'').toLowerCase(); if(lower==='bootstrap'||lower==='token')")
+             html))
+    (should (string-match-p (regexp-quote "clean.append(key,value)") html))
     (should (string-match-p (regexp-quote "scrubSensitiveQueryFromLocation();") html))
     (should (string-match-p
              (regexp-quote "history.replaceState({id:currentId},'',q?'?'+q:location.pathname)")
              html))))
+
+(ert-deftest doclive-test-preview-html-tolerates-blocked-local-storage ()
+  "Preview HTML should not fail initialization when localStorage is unavailable."
+  (let ((html (doclive--preview-html)))
+    (should (string-match-p
+             (regexp-quote
+              "function getStoredTheme(){try{return localStorage.getItem('doclive-theme');}catch(e){return null;}}")
+             html))
+    (should (string-match-p
+             (regexp-quote
+              "function storeTheme(theme){try{localStorage.setItem('doclive-theme',theme);}catch(e){}}")
+             html))
+    (should (string-match-p
+             (regexp-quote "applyTheme(getStoredTheme());")
+             html))
+    (should-not (string-match-p
+                 (regexp-quote "applyTheme(localStorage.getItem('doclive-theme'));")
+                 html))))
 
 (ert-deftest doclive-test-example-links ()
   "Example Markdown and Org fixtures should link to each other."
