@@ -183,10 +183,12 @@ nix flake check
 agent 実行では Playwright で DOM assertion と screenshot / console log を保存し、人間の目視だけを成功条件にしません。
 
 #+begin_src sh
-emacs -Q -L . -l doclive.el \
-  --eval '(setq doclive-open-browser-function (lambda (url) (princ (concat url "\n"))))' \
+emacs -Q --batch -L . -l doclive.el \
+  --eval '(setq doclive-open-browser-function (lambda (_url) (princ "preview opened\n")))' \
   --eval '(doclive-preview-file (expand-file-name "example/sample.md" default-directory))' \
-  --eval '(while t (accept-process-output nil 1))'
+  --eval '(dotimes (_ 3) (accept-process-output nil 1))' \
+  --eval '(doclive-stop-server)' \
+  --eval '(kill-emacs)'
 #+end_src
 
 * Troubleshooting
