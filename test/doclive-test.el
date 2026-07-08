@@ -573,6 +573,7 @@
     (should (string-match-p "data:" html))
     (should (string-match-p "xlink:href" html))
     (should (string-match-p (regexp-quote "name.toLowerCase()==='style'") html))
+    (should (string-match-p (regexp-quote "el.setAttribute('rel','noopener noreferrer')") html))
     (should (string-match-p (regexp-quote "return '&#39;'") html))
     (should-not (string-match-p (regexp-quote ",:'&#39;'") html))))
 
