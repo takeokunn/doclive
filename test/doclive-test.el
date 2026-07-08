@@ -776,6 +776,17 @@
                  (regexp-quote (concat "id=" (url-hexify-string (doclive--buffer-id (current-buffer)))))
                  url))))))
 
+(ert-deftest doclive-test-stop-server-clears-session-token ()
+  "Stopping the server should invalidate URLs from the old session."
+  (let ((doclive--server nil)
+        (doclive--server-token "old-token")
+        (doclive--change-timers (make-hash-table :test #'equal))
+        (doclive--sse-clients (make-hash-table :test #'equal)))
+    (cl-letf (((symbol-function 'message)
+               (lambda (&rest _args) nil)))
+      (doclive-stop-server))
+    (should-not doclive--server-token)))
+
 (ert-deftest doclive-test-start-server-validates-host-and-port ()
   "Server startup should reject malformed local server settings."
   (let ((doclive-host "127.0.0.1/path")
@@ -1025,6 +1036,27 @@
           (should-not (doclive--get-entry id)))
       (when (buffer-live-p buf)
         (kill-buffer buf)))))
+
+(ert-deftest doclive-test-preview-mode-disable-removes-served-buffer ()
+  "Disabling preview mode should stop serving the buffer immediately."
+  (let ((doclive--buffers (make-hash-table :test #'equal))
+        (doclive--change-timers (make-hash-table :test #'equal))
+        (doclive--sse-clients (make-hash-table :test #'equal))
+        (canceled nil))
+    (cl-letf (((symbol-function 'cancel-timer)
+               (lambda (timer)
+                 (push timer canceled))))
+      (with-temp-buffer
+        (setq buffer-file-name "/tmp/doclive-disable.md")
+        (insert "# Disable\n")
+        (doclive-preview-mode 1)
+        (let ((id (doclive--buffer-id (current-buffer))))
+          (should (doclive--get-entry id))
+          (puthash id 'timer-before-disable doclive--change-timers)
+          (doclive-preview-mode -1)
+          (should-not (doclive--get-entry id))
+          (should-not (gethash id doclive--change-timers))
+          (should (equal canceled '(timer-before-disable))))))))
 
 (ert-deftest doclive-test-change-timers-are-buffer-local ()
   "Debounced change timers should not overwrite each other across buffers."

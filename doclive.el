@@ -860,6 +860,7 @@ SSE client for live-update support."
   (when (doclive-server-running-p)
     (delete-process doclive--server)
     (setq doclive--server nil))
+  (setq doclive--server-token nil)
   (maphash (lambda (_id clients)
              (dolist (proc clients)
                (when (process-live-p proc)
@@ -895,6 +896,7 @@ SSE client for live-update support."
   (when (processp doclive--server)
     (delete-process doclive--server))
   (setq doclive--server nil)
+  (setq doclive--server-token nil)
   (maphash (lambda (_id clients)
              (dolist (proc clients)
                (when (process-live-p proc)
@@ -966,7 +968,10 @@ Disable this mode when you are done previewing."
     (remove-hook 'after-change-functions #'doclive--on-change t)
     (remove-hook 'after-save-hook #'doclive--on-change t)
     (remove-hook 'kill-buffer-hook #'doclive--on-kill t)
-    (doclive--cancel-change-timer (current-buffer))))
+    (let ((entry (doclive--get-entry (doclive--buffer-id (current-buffer)))))
+      (if entry
+          (doclive--cleanup-entry entry)
+        (doclive--cancel-change-timer (current-buffer))))))
 
 ;;;###autoload
 (defun doclive-preview-buffer (&optional force-restart)
