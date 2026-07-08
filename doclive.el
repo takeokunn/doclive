@@ -575,15 +575,16 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
 (defun doclive--http-response (status content-type body &optional script-nonce)
   "Build HTTP response from STATUS CONTENT-TYPE BODY.
 SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
-  (concat
-   (format "HTTP/1.1 %s\r\n" status)
-   "Connection: close\r\n"
-   (format "Content-Type: %s; charset=utf-8\r\n" content-type)
-   (format "Content-Length: %d\r\n" (string-bytes body))
-   "Cache-Control: no-store\r\n"
-   (doclive--browser-security-header-lines script-nonce)
-   "\r\n"
-   body))
+  (let ((encoded-body (encode-coding-string body 'utf-8-unix t)))
+    (concat
+     (format "HTTP/1.1 %s\r\n" status)
+     "Connection: close\r\n"
+     (format "Content-Type: %s; charset=utf-8\r\n" content-type)
+     (format "Content-Length: %d\r\n" (string-bytes encoded-body))
+     "Cache-Control: no-store\r\n"
+     (doclive--browser-security-header-lines script-nonce)
+     "\r\n"
+     encoded-body)))
 
 (defun doclive--browser-security-header-lines (&optional script-nonce)
   "Return HTTP header lines for browser-side response hardening.

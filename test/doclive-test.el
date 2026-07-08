@@ -895,6 +895,21 @@
     (should (string-match-p "connect-src 'self'\r\n" response))
     (should (string-match-p "Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()\r\n" response))))
 
+(ert-deftest doclive-test-http-response-encodes-body-before-length ()
+  "Content-Length should describe the emitted UTF-8 response bytes."
+  (let* ((body "日本語🙂")
+         (encoded-body (encode-coding-string body 'utf-8-unix t))
+         (response (doclive--http-response "200 OK" "text/plain" body))
+         (body-start (string-match-p "\r\n\r\n" response)))
+    (should body-start)
+    (should (string-match-p
+             (format "Content-Length: %d\r\n" (string-bytes encoded-body))
+             response))
+    (should (equal (substring response (+ body-start 4)) encoded-body))
+    (should (equal (decode-coding-string (substring response (+ body-start 4))
+                                         'utf-8-unix t)
+                   body))))
+
 (ert-deftest doclive-test-http-response-csp-includes-custom-asset-origins ()
   "CSP should allow configured asset origins and same-origin mirrors."
   (let ((doclive-preview-asset-urls
