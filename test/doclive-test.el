@@ -869,6 +869,8 @@
 (ert-deftest doclive-test-query-param-rejects-duplicates ()
   "Query parameter parser should reject ambiguous duplicate keys."
   (should-not (doclive--query-param "/content?id=abc&id=def" "id"))
+  (should-not (doclive--query-param "/content?id=abc&ID=def" "id"))
+  (should-not (doclive--query-param "/content?%69d=abc&ID=def" "id"))
   (should-not (doclive--query-param "/content?token=secret&token=secret" "token"))
   (should-not (doclive--query-param "/open?id=a&path=one.md&path=two.md" "path"))
   (should (equal (doclive--query-param "/open?id=a&id=b&path=target.md" "path")

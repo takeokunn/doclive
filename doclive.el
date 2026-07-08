@@ -840,6 +840,7 @@ runtime script and style when it is safe for CSP nonce use."
   "Extract KEY from query in PATH."
   (when (and path (string-match "\\?" path))
     (let ((pairs (split-string (substring path (1+ (match-beginning 0))) "&" t))
+          (wanted (downcase key))
           found
           seen
           duplicate
@@ -855,7 +856,7 @@ runtime script and style when it is safe for CSP nonce use."
                  (decoded-value (doclive--decode-query-component raw-value)))
             (if (or (null decoded-key) (null decoded-value))
                 (setq invalid t)
-              (when (string= decoded-key key)
+              (when (string= (downcase decoded-key) wanted)
                 (if seen
                     (setq duplicate t)
                   (setq seen t
