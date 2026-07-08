@@ -862,13 +862,14 @@ runtime script and style when it is safe for CSP nonce use."
 (defun doclive--valid-query-p (path)
   "Return non-nil when PATH has safe, unambiguous query syntax."
   (or (not (and path (string-match "\\?" path)))
-      (let ((pairs (split-string (substring path (1+ (match-beginning 0))) "&" t))
+      (let ((pairs (split-string (substring path (1+ (match-beginning 0))) "&"))
             (seen-keys (make-hash-table :test #'equal))
             invalid
             duplicate
             token-parameter)
         (dolist (p pairs (and (not invalid) (not duplicate) (not token-parameter)))
-          (if (not (string-match "=" p))
+          (if (or (string= p "")
+                  (not (string-match "=" p)))
               (setq invalid t)
             (let* ((eq (match-beginning 0))
                    (raw-key (substring p 0 eq))
