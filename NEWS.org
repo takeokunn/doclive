@@ -29,6 +29,8 @@
   - Validation for host, port, debounce delay, and customized browser asset URLs.
   - Browser asset URLs are escaped before HTML embedding; malformed authorities,
     userinfo, non-numeric ports, and active-content schemes are rejected.
+  - Browser asset URL authorities reject malformed DNS labels such as empty
+    labels and leading or trailing hyphens.
   - Rendered document URL attributes are allowlisted before DOM insertion; form
     actions, media posters, and unparsed srcset lists are covered.
   - Linked-document resolution rejects protocol-relative URLs consistently with

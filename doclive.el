@@ -206,7 +206,11 @@ they resolve under the current document's directory."
   (and (stringp authority)
        (not (string-empty-p authority))
        (or (string-match-p "\\`\\[[0-9a-fA-F:.]+\\]\\(?::[0-9]+\\)?\\'" authority)
-           (string-match-p "\\`[[:alnum:].-]+\\(?::[0-9]+\\)?\\'" authority))))
+           (and (string-match "\\`\\([[:alnum:].-]+\\)\\(?::[0-9]+\\)?\\'" authority)
+                (cl-every
+                 (lambda (label)
+                   (string-match-p "\\`[[:alnum:]]\\(?:[[:alnum:]-]*[[:alnum:]]\\)?\\'" label))
+                 (split-string (match-string 1 authority) "\\."))))))
 
 (defun doclive--absolute-asset-url-origin (url)
   "Return the normalized origin for absolute HTTP(S) asset URL, or nil."

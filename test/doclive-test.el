@@ -515,6 +515,9 @@
                  "https://example.invalid/marked.js\nbad"
                  "https://example.invalid;script-src/marked.js"
                  "https://example.invalid:bad/marked.js"
+                 "https://-example.invalid/marked.js"
+                 "https://example-.invalid/marked.js"
+                 "https://example..invalid/marked.js"
                  "https://user@example.invalid/marked.js"
                  "https:///marked.js"))
     (should-not (doclive--safe-asset-url-p url)))
@@ -958,7 +961,7 @@
            (katex-css . "https://assets.example.invalid:bad/katex.css")
            (marked-script . "https://user@assets.example.invalid/marked.js")
            (highlight-script . "https:///highlight.js")
-           (katex-script . "/vendor/katex.js")
+           (katex-script . "https://assets-.example.invalid/katex.js")
            (katex-auto-render-script . "/vendor/auto-render.js")
            (mermaid-script . "https://diagrams.example.invalid/mermaid.js"))))
     (let ((response (doclive--http-response "200 OK" "text/plain" "body" "nonce123_-")))
