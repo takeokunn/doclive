@@ -29,6 +29,9 @@ AI が生成した Mermaid 図や LaTeX 数式（equation, align, gather, cases 
 
 ** MELPA
 
+MELPA へ登録後は次の手順でインストールできます。
+登録前に試す場合は [[*From source checkout][From source checkout]] を使ってください。
+
 #+begin_src emacs-lisp
 (require 'package)
 (add-to-list 'package-archives '("melpa" . "https://melpa.org/packages/") t)
@@ -96,6 +99,8 @@ fragment や query はファイル解決時には無視され、remote URL や�
 M-x doclive-stop-server
 #+end_example
 
+サーバー停止時には現在のセッション token が破棄されるため、既存の preview URL は次回起動後に使い回せません。
+
 ** プレビュー再読み込み
 
 現在のバッファの最新スナップショットを強制的にプッシュします。
@@ -117,6 +122,8 @@ M-x doclive-reload-page
 
 doclive はローカルHTTPサーバーを起動し、既定では =127.0.0.1= に bind します。
 プレビューURLにはセッションごとの =token= が含まれ、=/preview= / =/content= / =/open= / =/events= は token が一致しないリクエストを拒否します。
+サーバー停止時には token を破棄し、次回起動時に新しい token を生成します。
+また、バッファで =doclive-preview-mode= を無効化すると、そのバッファの preview entry、SSE client、更新 timer を削除し、以後は配信対象から外します。
 このURLは bearer secret として扱い、共有・ログ貼り付け・公開スクリーンショットへの写り込みを避けてください。
 preview HTML と HTTP response は =no-referrer= を設定し、token を含むURLが外部CDNへの Referer として送られないようにします。
 
@@ -148,7 +155,8 @@ make package-lint
 make autoloads
 #+end_src
 
-Nix を使う場合は、同じ品質ゲートを flake 経由で確認できます。
+Nix を使う場合は、compile / test / lint / package-lint を flake 経由でも確認できます。
+PR や release 前には autoload 差分と whitespace も確認するため、最終ゲートとして =make check= も実行してください。
 
 #+begin_src sh
 nix flake check

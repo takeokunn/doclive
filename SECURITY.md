@@ -41,6 +41,9 @@ browser context.  The implementation therefore relies on:
 - HTML sanitization before preview insertion
 - local linked-document confinement under the source directory by default
 - disabled local-variable evaluation for linked documents
+- token invalidation when the preview server stops
+- preview entry, SSE client, and update-timer cleanup when `doclive-preview-mode`
+  is disabled for a buffer
 
 Reports that bypass or weaken these boundaries are security bugs.
 

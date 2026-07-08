@@ -22,9 +22,10 @@
   - Referrer suppression and nosniff headers on local HTTP responses.
   - SSE responses also send no-referrer, nosniff, and no-store cache headers.
   - Local linked document navigation stays under the source file directory by default.
+  - Preview commands and linked-document navigation disable local-variable evaluation while opening files.
   - Validation for host, port, debounce delay, and customized browser asset URLs.
   - Browser asset URLs are escaped before HTML embedding and active-content schemes are rejected.
-  - Session lifecycle management: buffer-kill cleanup, Emacs shutdown hook.
+  - Session lifecycle management: buffer-kill cleanup, preview-mode disable cleanup, server-stop token invalidation, Emacs shutdown hook.
   - Customizable host, port, browser-open function, and debounce delay.
   - Interactive commands: ~doclive-preview-buffer~ (C-u to restart server),
     ~doclive-preview-file~, ~doclive-stop-server~, ~doclive-reload-page~.
