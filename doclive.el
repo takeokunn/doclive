@@ -1125,7 +1125,8 @@ Return :invalid when REQUEST contains malformed or folded headers."
               (entry (and code (gethash code doclive--bootstrap-codes))))
          (and (stringp id)
               (doclive--safe-cookie-token-p code)
-              entry
+              (listp entry)
+              (numberp (plist-get entry :expires))
               (string= id (plist-get entry :id))
               (<= (float-time) (plist-get entry :expires))
               (progn

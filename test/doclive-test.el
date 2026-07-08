@@ -1777,6 +1777,27 @@
         (should (string-match-p "403 Forbidden" response))
         (should (gethash "expired-code" doclive--bootstrap-codes))))))
 
+(ert-deftest doclive-test-route-request-rejects-malformed-bootstrap-entry ()
+  "Malformed bootstrap table entries should fail closed."
+  (let ((doclive--server-token "secret")
+        (doclive--bootstrap-codes (make-hash-table :test #'equal))
+        (sent nil)
+        (deleted nil))
+    (puthash "malformed-code"
+             (list :id "abc")
+             doclive--bootstrap-codes)
+    (cl-letf (((symbol-function 'process-send-string)
+               (lambda (_proc string)
+                 (push string sent)))
+              ((symbol-function 'delete-process)
+               (lambda (_proc)
+                 (setq deleted t))))
+      (doclive--route-request 'fake-proc "/preview?id=abc&bootstrap=malformed-code")
+      (let ((response (mapconcat #'identity sent "")))
+        (should deleted)
+        (should (string-match-p "403 Forbidden" response))
+        (should (gethash "malformed-code" doclive--bootstrap-codes))))))
+
 (ert-deftest doclive-test-route-request-allows-cookie-authorized-content ()
   "Protected content routes should accept the HttpOnly session cookie."
   (let ((doclive--server-token "secret")
