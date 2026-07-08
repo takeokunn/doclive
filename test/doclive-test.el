@@ -903,6 +903,30 @@
       (insert-file-contents org)
       (should (string-match-p "sample.md" (buffer-string))))))
 
+(ert-deftest doclive-test-example-script-loads-project-root ()
+  "Example startup script should load doclive from the checkout root."
+  (let* ((script (expand-file-name "example/sample.el" default-directory))
+         (project-directory (expand-file-name ".." (file-name-directory script)))
+         (required nil)
+         (opened nil)
+         (previewed nil))
+    (cl-letf (((symbol-function 'require)
+               (lambda (feature &optional _filename _noerror)
+                 (when (eq feature 'doclive)
+                   (setq required t)
+                   (should (member project-directory load-path)))
+                 feature))
+              ((symbol-function 'find-file)
+               (lambda (file &rest _args)
+                 (setq opened file)))
+              ((symbol-function 'doclive-preview-buffer)
+               (lambda (&rest _args)
+                 (setq previewed t))))
+      (load script nil t))
+    (should required)
+    (should (equal opened (expand-file-name "example/sample.org" default-directory)))
+    (should previewed)))
+
 ;; Request parsing
 
 (ert-deftest doclive-test-parse-request-path ()
