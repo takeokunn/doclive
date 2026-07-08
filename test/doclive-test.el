@@ -1195,6 +1195,41 @@
            "GET / HTTP/1.1\r\nBad Name: nope\r\nBad\tName: nope\r\nCookie: doclive-token=secret\r\n\r\n")
           '(("cookie" . "doclive-token=secret")))))
 
+(ert-deftest doclive-test-valid-host-header ()
+  "HTTP/1.1 Host handling should reject ambiguous or unexpected hosts."
+  (let ((doclive-host "127.0.0.1")
+        (doclive-port 39123))
+    (should (doclive--valid-host-header-p
+             "GET / HTTP/1.1"
+             '(("host" . "127.0.0.1:39123"))))
+    (should (doclive--valid-host-header-p
+             "GET / HTTP/1.1"
+             '(("host" . "127.0.0.1"))))
+    (should-not (doclive--valid-host-header-p
+                 "GET / HTTP/1.1"
+                 nil))
+    (should-not (doclive--valid-host-header-p
+                 "GET / HTTP/1.1"
+                 '(("host" . "localhost:39123"))))
+    (should-not (doclive--valid-host-header-p
+                 "GET / HTTP/1.1"
+                 '(("host" . "127.0.0.1:39123")
+                   ("host" . "127.0.0.1:39123"))))
+    (should-not (doclive--valid-host-header-p
+                 "GET / HTTP/1.1"
+                 '(("host" . "127.0.0.1:70000"))))
+    (should-not (doclive--valid-host-header-p
+                 "GET / HTTP/1.1"
+                 '(("host" . "127.0.0.1:39123 bad")))))
+  (let ((doclive-host "0.0.0.0")
+        (doclive-port 39123))
+    (should (doclive--valid-host-header-p
+             "GET / HTTP/1.1"
+             '(("host" . "docs.example.invalid:39123"))))
+    (should-not (doclive--valid-host-header-p
+                 "GET / HTTP/1.1"
+                 '(("host" . "docs.example.invalid:bad"))))))
+
 (ert-deftest doclive-test-authorized-request-uses-secure-token-compare ()
   "Route authorization should use the hardened token comparison helper."
   (let ((doclive--server-token "secret")
@@ -1634,6 +1669,8 @@
 (ert-deftest doclive-test-connection-filter-buffers-partial-requests ()
   "Connection filter should wait until the full HTTP header block arrives."
   (let ((routed nil)
+        (doclive-host "127.0.0.1")
+        (doclive-port 39123)
         (proc (make-process :name "doclive-test-filter"
                             :buffer nil
                             :command '("cat")
@@ -1646,10 +1683,10 @@
           (should-not routed)
           (should (equal (process-get proc 'doclive-request-buffer)
                          "GET /preview?id=abc HTTP/1.1\r\nHo"))
-          (doclive--connection-filter proc "st: example\r\nUser-Agent: test\r\n\r\n")
+          (doclive--connection-filter proc "st: 127.0.0.1:39123\r\nUser-Agent: test\r\n\r\n")
           (should (equal (car routed) "/preview?id=abc"))
           (should (equal (cadr routed)
-                         '(("host" . "example")
+                         '(("host" . "127.0.0.1:39123")
                            ("user-agent" . "test"))))
           (should-not (process-get proc 'doclive-request-buffer)))
       (when (process-live-p proc)
@@ -1658,6 +1695,8 @@
 (ert-deftest doclive-test-connection-filter-ignores-post-header-bytes ()
   "Connection filter should not parse bytes after the header block as headers."
   (let ((doclive--server-token "secret")
+        (doclive-host "127.0.0.1")
+        (doclive-port 39123)
         (sent nil)
         (deleted nil)
         (proc (make-process :name "doclive-test-post-header"
@@ -1673,11 +1712,42 @@
                      (setq deleted t))))
           (doclive--connection-filter
            proc
-           "GET /content?id=abc HTTP/1.1\r\nHost: example\r\n\r\nCookie: doclive-token=secret\r\n")
+           "GET /content?id=abc HTTP/1.1\r\nHost: 127.0.0.1:39123\r\n\r\nCookie: doclive-token=secret\r\n")
           (should deleted)
           (should (string-match-p "403 Forbidden" (mapconcat #'identity sent ""))))
       (when (process-live-p proc)
         (delete-process proc)))))
+
+(ert-deftest doclive-test-connection-filter-rejects-invalid-host-header ()
+  "Connection filter should reject HTTP/1.1 requests with invalid Host."
+  (dolist (request '("GET /content?id=abc HTTP/1.1\r\n\r\n"
+                     "GET /content?id=abc HTTP/1.1\r\nHost: localhost:39123\r\n\r\n"
+                     "GET /content?id=abc HTTP/1.1\r\nHost: 127.0.0.1:39123\r\nHost: 127.0.0.1:39123\r\n\r\n"))
+    (let ((sent nil)
+          (deleted nil)
+          (routed nil)
+          (doclive-host "127.0.0.1")
+          (doclive-port 39123)
+          (proc (make-process :name "doclive-test-invalid-host"
+                              :buffer nil
+                              :command '("cat")
+                              :noquery t)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'doclive--route-request)
+                     (lambda (_proc _path &optional _headers)
+                       (setq routed t)))
+                    ((symbol-function 'process-send-string)
+                     (lambda (_proc string)
+                       (push string sent)))
+                    ((symbol-function 'delete-process)
+                     (lambda (_proc)
+                       (setq deleted t))))
+            (doclive--connection-filter proc request)
+            (should deleted)
+            (should-not routed)
+            (should (string-match-p "400 Bad Request" (mapconcat #'identity sent ""))))
+        (when (process-live-p proc)
+          (delete-process proc))))))
 
 (ert-deftest doclive-test-connection-filter-rejects-invalid-methods ()
   "Connection filter should reject non-GET requests instead of routing them."

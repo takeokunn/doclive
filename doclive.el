@@ -910,6 +910,12 @@ runtime script and style when it is safe for CSP nonce use."
   "\\`[!#$%&'*+.^_`|~0-9A-Za-z-]+\\'"
   "Regexp matching supported HTTP header field names.")
 
+(defun doclive--request-http-version (request-line)
+  "Return the HTTP version from REQUEST-LINE, or nil."
+  (when (and (stringp request-line)
+             (string-match " HTTP/\\([0-9]+\\.[0-9]+\\)\\(?:\r\\)?\\'" request-line))
+    (match-string 1 request-line)))
+
 (defun doclive--parse-request-headers (request)
   "Parse HTTP REQUEST headers into a case-folded alist."
   (let (headers)
@@ -928,6 +934,39 @@ runtime script and style when it is safe for CSP nonce use."
     (dolist (header headers (nreverse values))
       (when (string= (car header) name)
         (push (cdr header) values)))))
+
+(defun doclive--parse-host-header-value (value)
+  "Return (HOST PORT) from Host header VALUE, or nil when malformed."
+  (let ((value (or value "")))
+    (cond
+     ((or (string-empty-p value)
+          (string-match-p "[[:cntrl:][:space:]/?#]" value))
+      nil)
+     ((string-match "\\`\\([^:]+\\):\\([0-9]+\\)\\'" value)
+      (let ((port (string-to-number (match-string 2 value))))
+        (and (doclive--valid-port-p port)
+             (list (downcase (match-string 1 value)) port))))
+     ((string-match-p ":" value)
+      nil)
+     (t
+      (list (downcase value) nil)))))
+
+(defun doclive--accepted-host-header-value-p (value)
+  "Return non-nil when Host header VALUE is acceptable for this server."
+  (let ((parsed (doclive--parse-host-header-value value)))
+    (and parsed
+         (or (not (doclive--loopback-host-p doclive-host))
+             (and (string= (car parsed) (downcase doclive-host))
+                  (or (null (cadr parsed))
+                      (= (cadr parsed) doclive-port)))))))
+
+(defun doclive--valid-host-header-p (request-line headers)
+  "Return non-nil when HEADERS are valid for REQUEST-LINE Host handling."
+  (let ((values (doclive--request-header-values headers "host")))
+    (if (string= (doclive--request-http-version request-line) "1.1")
+        (and (= (length values) 1)
+             (doclive--accepted-host-header-value-p (car values)))
+      (cl-every #'doclive--accepted-host-header-value-p values))))
 
 (defun doclive--cookie-token (headers)
   "Return the doclive session token from HEADERS, or nil on ambiguity."
@@ -1119,7 +1158,11 @@ runtime script and style when it is safe for CSP nonce use."
               (progn
                 (process-send-string proc (doclive--http-response "400 Bad Request" "text/plain" "Bad Request"))
                 (delete-process proc))
-            (doclive--route-request proc path headers)))))))
+            (if (not (doclive--valid-host-header-p line headers))
+                (progn
+                  (process-send-string proc (doclive--http-response "400 Bad Request" "text/plain" "Bad Request"))
+                  (delete-process proc))
+              (doclive--route-request proc path headers))))))))
 
 (defun doclive-server-running-p ()
   "Return non-nil when doclive server is running."
