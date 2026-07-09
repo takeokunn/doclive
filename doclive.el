@@ -1,17 +1,16 @@
 ;;; doclive.el --- Fast Markdown and Org preview for AI docs -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2026 takeokunn
+;; Copyright (C) 2026 takeokunn <bararararatty@gmail.com>
 ;;
-;; Author: takeokunn
-;; Assisted-by: OpenAI Codex: GPT-5
-;; Maintainer: takeokunn
+;; Author: takeokunn <bararararatty@gmail.com>
+;; Maintainer: takeokunn <bararararatty@gmail.com>
 ;; URL: https://github.com/takeokunn/doclive
-;; Version: 0.1.1
-;; Package-Requires: ((emacs "28.1"))
-;; Keywords: markdown, org, tools, convenience
+;; Version: 1.1.0
+;; Keywords: markdown org tools convenience
+;; Package-Requires: ((emacs "29.1"))
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;;
-;; This file is not part of GNU Emacs.
+;; This file is NOT part of GNU Emacs.
 ;;
 ;; This program is free software: you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -756,48 +755,58 @@ runtime script and style when it is safe for CSP nonce use."
    (let ((nonce (doclive--browser-script-nonce script-nonce)))
      (if nonce (concat " nonce='" (doclive--escape-html-attribute nonce) "'") ""))
    ">"
-   ":root{--bg:#0d1117;--panel:#111827;--text:#e6edf3;--muted:#8b949e;--border:#30363d;--accent:#58a6ff;}"
-   "body[data-theme='light']{--bg:#f6f8fa;--panel:#ffffff;--text:#24292f;--muted:#57606a;--border:#d0d7de;--accent:#0969da;}"
-   "*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;}"
-   ".layout{display:grid;grid-template-columns:280px 1fr;min-height:100vh;}"
-   ".toc{padding:16px;border-right:1px solid var(--border);background:linear-gradient(180deg,#0f1724 0,#0d1117 100%);overflow:auto;position:sticky;top:0;height:100vh;}"
-   ".toc h2{margin:0 0 12px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);}"
-   ".toc a{display:block;color:#c9d1d9;text-decoration:none;padding:6px 8px;border-radius:8px;font-size:13px;}"
-   ".toc a:hover{background:#1f2937;color:#fff;}"
-   ".main{padding:20px 4vw 40px;}"
-   ".status{font-size:12px;color:var(--muted);margin-bottom:16px;display:flex;gap:8px;align-items:center;}"
-   ".toolbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;align-items:center;}"
-   ".toolbar input,.toolbar button,.toolbar select{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;}"
-   ".toolbar button{cursor:pointer;}"
-   ".chips{display:flex;gap:6px;flex-wrap:wrap;}"
-   ".chip{border:1px solid var(--border);border-radius:999px;padding:3px 8px;font-size:11px;display:flex;gap:6px;align-items:center;background:var(--panel);}"
-   ".chip b{font-weight:600;}"
-   ".chip-close{border:none;background:transparent;color:var(--muted);cursor:pointer;padding:0;font-size:12px;line-height:1;}"
-   ".dot{width:8px;height:8px;border-radius:999px;background:#3fb950;display:inline-block;}"
-   ".dot-disconnected{background:#f85149;}"
-   ".md{max-width:980px;margin:0 auto;padding:28px;border:1px solid var(--border);border-radius:14px;background:color-mix(in oklab,var(--panel) 70%, transparent);box-shadow:0 8px 30px rgba(0,0,0,.15);}"
-   ".md pre{position:relative;background:#0b1220;padding:14px;border:1px solid #243041;border-radius:10px;overflow:auto;}"
-   "body[data-theme='light'] .md pre{background:#f6f8fa;border-color:#d8dee4;}"
-   ".frontmatter{margin:0 0 16px;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--panel);}"
-   ".frontmatter summary{cursor:pointer;padding:10px 12px;font-weight:600;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em;}"
+   ":root{--bg:#09111f;--bg-2:#132235;--panel:#101827;--panel-strong:#172235;--surface-glass:rgba(16,24,39,.74);--text:#eef5ff;--muted:#9fb0c7;--border:rgba(175,194,220,.18);--accent:#5eead4;--accent-2:#f8b84e;--accent-ink:#062621;--danger:#ff6b6b;--shadow:0 24px 80px rgba(0,0,0,.34);--mark:#f8e16c;}"
+   "body[data-theme='light']{--bg:#f4efe6;--bg-2:#dbeafe;--panel:#fffaf0;--panel-strong:#ffffff;--surface-glass:rgba(255,250,240,.82);--text:#172033;--muted:#667085;--border:rgba(37,54,79,.16);--accent:#0f766e;--accent-2:#b45309;--accent-ink:#f5fffc;--danger:#b42318;--shadow:0 24px 70px rgba(80,64,38,.18);--mark:#ffe08a;}"
+   "*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;min-height:100vh;background:radial-gradient(circle at top left,rgba(94,234,212,.2),transparent 34rem),radial-gradient(circle at 85% 12%,rgba(248,184,78,.16),transparent 28rem),linear-gradient(135deg,var(--bg),var(--bg-2));color:var(--text);font-family:'Avenir Next','SF Pro Rounded','Segoe UI',sans-serif;}"
+   "button,input,select{font:inherit}button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
+   ".layout{display:grid;grid-template-columns:minmax(230px,300px) minmax(0,1fr);gap:clamp(18px,3vw,36px);min-height:100vh;padding:clamp(14px,2.4vw,32px);}"
+   ".toc{padding:18px;border:1px solid var(--border);border-radius:26px;background:linear-gradient(180deg,var(--surface-glass),rgba(16,24,39,.48));box-shadow:var(--shadow);backdrop-filter:blur(18px);overflow:auto;position:sticky;top:24px;height:calc(100vh - 48px);}"
+   ".toc h2{margin:0 0 14px;font-size:11px;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);}"
+   ".toc a{display:block;color:var(--text);text-decoration:none;padding:8px 10px;border-radius:12px;font-size:13px;line-height:1.35;opacity:.78;transition:background .18s ease,opacity .18s ease,transform .18s ease;}"
+   ".toc a:hover{background:rgba(94,234,212,.14);color:var(--text);opacity:1;transform:translateX(2px);}"
+   ".main{min-width:0;padding:4px 0 42px;}"
+   ".hero{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin:2px auto 18px;max-width:1100px;animation:doclive-rise .42s ease-out both;}"
+   ".eyebrow{margin:0 0 6px;color:var(--accent);font-size:11px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;}"
+   ".hero h1{margin:0;font-family:'Iowan Old Style','Charter','Source Serif 4',serif;font-size:clamp(30px,5vw,58px);line-height:.95;letter-spacing:-.04em;}"
+   ".status{font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center;border:1px solid var(--border);border-radius:999px;background:var(--surface-glass);padding:8px 12px;box-shadow:0 10px 30px rgba(0,0,0,.14);white-space:nowrap;}"
+   ".toolbar{position:sticky;top:16px;z-index:4;display:flex;flex-wrap:wrap;gap:10px;margin:0 auto 18px;align-items:center;max-width:1100px;padding:10px;border:1px solid var(--border);border-radius:22px;background:var(--surface-glass);box-shadow:var(--shadow);backdrop-filter:blur(20px);animation:doclive-rise .5s ease-out .05s both;}"
+   ".toolbar input,.toolbar button,.toolbar select{background:var(--panel-strong);color:var(--text);border:1px solid var(--border);border-radius:14px;padding:9px 12px;font-size:12px;min-height:36px;}"
+   ".toolbar input{min-width:min(280px,100%);flex:1 1 220px;background:linear-gradient(180deg,var(--panel-strong),var(--panel));}"
+   ".toolbar button{cursor:pointer;font-weight:700;letter-spacing:.01em;transition:transform .16s ease,background .16s ease,border-color .16s ease;}"
+   ".toolbar button:hover:not(:disabled){transform:translateY(-1px);border-color:color-mix(in oklab,var(--accent) 55%,var(--border));background:color-mix(in oklab,var(--accent) 16%,var(--panel-strong));}"
+   ".toolbar button:disabled{opacity:.42;cursor:not-allowed}.toolbar select{cursor:pointer}.toolbar .primary{background:linear-gradient(135deg,var(--accent),color-mix(in oklab,var(--accent) 64%,var(--accent-2)));color:var(--accent-ink);border-color:transparent;}"
+   ".chips{display:flex;gap:6px;flex-wrap:wrap;min-width:0;}"
+   ".chip{border:1px solid var(--border);border-radius:999px;padding:5px 9px;font-size:11px;display:flex;gap:7px;align-items:center;background:color-mix(in oklab,var(--panel-strong) 76%,transparent);}"
+   ".chip b{font-weight:700;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}"
+   ".chip-close{border:none;background:transparent;color:var(--muted);cursor:pointer;padding:0;font-size:13px;line-height:1;min-height:0;}"
+   ".dot{width:9px;height:9px;border-radius:999px;background:#35d07f;display:inline-block;box-shadow:0 0 0 6px rgba(53,208,127,.14);animation:doclive-pulse 1.8s ease-in-out infinite;}"
+   ".dot-disconnected{background:var(--danger);box-shadow:0 0 0 6px color-mix(in oklab,var(--danger) 18%,transparent);}"
+   ".md{max-width:1100px;margin:0 auto;padding:clamp(24px,4.4vw,54px);border:1px solid var(--border);border-radius:30px;background:linear-gradient(180deg,color-mix(in oklab,var(--panel-strong) 88%,transparent),color-mix(in oklab,var(--panel) 78%,transparent));box-shadow:var(--shadow);animation:doclive-rise .56s ease-out .1s both;}"
+   ".md{font-family:'Iowan Old Style','Charter','Source Serif 4',serif;font-size:17px;line-height:1.72}.md h1,.md h2,.md h3{font-family:'Avenir Next','SF Pro Rounded','Segoe UI',sans-serif;letter-spacing:-.035em;line-height:1.12}.md a{color:var(--accent);text-decoration-thickness:2px;text-underline-offset:3px}.md img{max-width:100%;border-radius:18px}"
+   ".md pre{position:relative;background:#06111f;padding:18px;border:1px solid rgba(94,234,212,.2);border-radius:18px;overflow:auto;box-shadow:inset 0 1px 0 rgba(255,255,255,.04);}"
+   "body[data-theme='light'] .md pre{background:#172033;color:#f8fafc;border-color:rgba(15,118,110,.24);}"
+   ".frontmatter{margin:0 0 18px;border:1px solid var(--border);border-radius:18px;overflow:hidden;background:color-mix(in oklab,var(--panel-strong) 84%,transparent);}"
+   ".frontmatter summary{cursor:pointer;padding:12px 14px;font-weight:800;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.12em;}"
    ".frontmatter table{margin:0;border-collapse:collapse;width:100%;}"
-   ".frontmatter th,.frontmatter td{border-top:1px solid var(--border);padding:8px 10px;text-align:left;font-size:12px;}"
-   ".copy-btn{position:absolute;top:8px;right:8px;background:#1f6feb;color:#fff;border:none;border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;}"
-   ".copy-btn:hover{background:#388bfd;}"
-   ".mark-pin-0{background:#fff59d;color:#111}.mark-pin-1{background:#ffd180;color:#111}.mark-pin-2{background:#b9f6ca;color:#111}.mark-pin-3{background:#80d8ff;color:#111}"
-   ".render-error{background:#1a0a0a;border:1px solid #f85149;border-radius:10px;padding:14px;margin:8px 0;font-family:monospace;font-size:12px;color:#f85149;overflow:auto;white-space:pre-wrap;}"
-   ".render-error::before{content:'⚠ Render error';display:block;font-weight:600;margin-bottom:8px;color:#ff7b72;}"
-   "body[data-theme='light'] .render-error{background:#fff5f5;border-color:#cf222e;color:#cf222e;}"
-   "body[data-theme='light'] .render-error::before{color:#cf222e;}"
-   ".md table{border-collapse:collapse;width:100%;}.md th,.md td{border:1px solid var(--border);padding:6px 8px;}"
-   "@media (max-width:980px){.layout{grid-template-columns:1fr}.toc{display:none}.main{padding:14px}}"
+   ".frontmatter th,.frontmatter td{border-top:1px solid var(--border);padding:9px 12px;text-align:left;font-size:12px;}"
+   ".copy-btn{position:absolute;top:10px;right:10px;background:var(--accent);color:var(--accent-ink);border:none;border-radius:999px;padding:6px 11px;font-size:12px;font-weight:800;cursor:pointer;box-shadow:0 8px 20px rgba(0,0,0,.2);}"
+   ".copy-btn:hover{filter:brightness(1.06);}"
+   ".mark-pin-0{background:var(--mark);color:#111}.mark-pin-1{background:#ffd180;color:#111}.mark-pin-2{background:#b9f6ca;color:#111}.mark-pin-3{background:#80d8ff;color:#111}"
+   ".render-error{background:color-mix(in oklab,var(--danger) 12%,var(--panel));border:1px solid var(--danger);border-radius:18px;padding:14px;margin:8px 0;font-family:'SF Mono','Cascadia Code',monospace;font-size:12px;color:var(--danger);overflow:auto;white-space:pre-wrap;}"
+   ".render-error::before{content:'⚠ Render error';display:block;font-weight:800;margin-bottom:8px;color:var(--danger);}"
+   "body[data-theme='light'] .render-error{background:#fff5f5;border-color:var(--danger);color:var(--danger);}"
+   "body[data-theme='light'] .render-error::before{color:var(--danger);}"
+   ".md table{border-collapse:collapse;width:100%;}.md th,.md td{border:1px solid var(--border);padding:8px 10px;}"
+   "@keyframes doclive-rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}@keyframes doclive-pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(.82);opacity:.72}}"
+   "@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}"
+   "@media (max-width:980px){.layout{grid-template-columns:1fr;padding:12px}.toc{position:relative;top:auto;height:auto;max-height:240px;border-radius:22px}.hero{align-items:flex-start;flex-direction:column}.toolbar{top:8px}.main{padding:0}.md{border-radius:22px}}"
    "</style></head><body>"
    "<div class='layout'><aside class='toc'><h2>Outline</h2><nav id='toc'></nav></aside>"
-   "<main class='main'><div class='status'><span class='dot' id='dot'></span><span id='status'>connecting…</span></div>"
-   "<div class='toolbar'>"
+   "<main class='main'><header class='hero'><div><p class='eyebrow'>Live document preview</p><h1>doclive workspace</h1></div><div class='status'><span class='dot' id='dot'></span><span id='status'>connecting…</span></div></header>"
+   "<div class='toolbar' role='toolbar' aria-label='Preview controls'>"
    "<button id='back'>←</button><button id='forward'>→</button>"
    "<input id='search' placeholder='Find in page'>"
-   "<button id='pin'>Pin</button>"
+   "<button id='pin' class='primary'>Pin</button>"
    "<span class='chips' id='chips'></span>"
    "<select id='theme'><option value='dark'>Dark</option><option value='light'>Light</option></select>"
    "<button id='zoom-out'>A-</button><button id='zoom-reset'>A</button><button id='zoom-in'>A+</button>"
@@ -1122,7 +1131,11 @@ Return :invalid when REQUEST contains malformed or folded headers."
   "Return non-nil if PATH is valid and HEADERS has the current token cookie."
   (and (doclive--valid-query-p path)
        (not (doclive--query-key-present-p path "bootstrap"))
-       (stringp doclive--server-token)
+       (doclive--authorized-cookie-p headers)))
+
+(defun doclive--authorized-cookie-p (headers)
+  "Return non-nil if HEADERS includes the current session cookie."
+  (and (stringp doclive--server-token)
        (let ((cookie-token (doclive--cookie-token headers)))
          (and (stringp cookie-token)
               (doclive--secure-string-equal-p cookie-token doclive--server-token)))))
@@ -1191,11 +1204,10 @@ Return :invalid when REQUEST contains malformed or folded headers."
     (cond
      ((doclive--authorized-request-p path headers)
       (doclive--send-preview proc))
-     ((and (doclive--query-key-present-p path "bootstrap")
-           (doclive--cookie-token headers))
-      (doclive--send-forbidden proc))
-     ((doclive--consume-bootstrap-code-p path)
-      (doclive--send-bootstrap-redirect proc path))
+     ((doclive--query-key-present-p path "bootstrap")
+      (if (doclive--consume-bootstrap-code-p path)
+          (doclive--send-bootstrap-redirect proc path)
+        (doclive--send-forbidden proc)))
      (t
       (doclive--send-forbidden proc))))
    ((doclive--route-matches-p path "/content")

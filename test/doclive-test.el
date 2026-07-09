@@ -77,10 +77,11 @@
 (ert-deftest doclive-test-package-headers-use-specific-maintainers ()
   "Package headers should not use generic contributor placeholders."
   (let ((source (doclive-test--doclive-source)))
-    (should (string-match-p (regexp-quote ";; Author: takeokunn") source))
-    (should (string-match-p (regexp-quote ";; Assisted-by: OpenAI Codex: GPT-5") source))
-    (should (string-match-p (regexp-quote ";; Maintainer: takeokunn") source))
-    (should (string-match-p (regexp-quote ";; Keywords: markdown, org, tools, convenience") source))
+    (should (string-match-p (regexp-quote ";; Author: takeokunn <bararararatty@gmail.com>") source))
+    (should (string-match-p (regexp-quote ";; Maintainer: takeokunn <bararararatty@gmail.com>") source))
+    (should (string-match-p (regexp-quote ";; Keywords: markdown org tools convenience") source))
+    (should (string-match-p (regexp-quote ";; Package-Requires: ((emacs \"29.1\"))") source))
+    (should-not (string-match-p (regexp-quote ";; Assisted-by: OpenAI Codex: GPT-5") source))
     (should-not (string-match-p (regexp-quote ";; Author: doclive contributors") source))
     (should-not (string-match-p (regexp-quote ";; Maintainer: doclive contributors") source))))
 
@@ -562,6 +563,23 @@
     (should (string-match-p "function pushNav" html))
     (should (string-match-p "mermaid" html))
     (should (string-match-p "katex" (downcase html)))))
+
+(ert-deftest doclive-test-preview-html-includes-modern-preview-shell ()
+  "Preview HTML should include the modern responsive UI shell."
+  (let ((html (doclive--preview-html)))
+    (should (string-match-p (regexp-quote "--surface-glass") html))
+    (should (string-match-p (regexp-quote "class='hero'") html))
+    (should (string-match-p (regexp-quote "doclive workspace") html))
+    (should (string-match-p (regexp-quote "role='toolbar'") html))
+    (should (string-match-p (regexp-quote "@media (prefers-reduced-motion:reduce)") html))
+    (should (string-match-p (regexp-quote "button:focus-visible") html))))
+
+(ert-deftest doclive-test-preview-html-keeps-outline-on-mobile ()
+  "Responsive layout should retain document outline instead of hiding it."
+  (let ((html (doclive--preview-html)))
+    (should (string-match-p (regexp-quote ".toc{position:relative") html))
+    (should (string-match-p (regexp-quote "max-height:240px") html))
+    (should-not (string-match-p (regexp-quote ".toc{display:none}") html))))
 
 (ert-deftest doclive-test-preview-html-disables-referrers ()
   "Preview HTML should prevent bootstrap URLs from leaking as referrers."
@@ -1656,8 +1674,8 @@
         (should-not called)
         (should (string-match-p "403 Forbidden" (mapconcat #'identity sent "")))))))
 
-(ert-deftest doclive-test-route-request-does-not-bootstrap-cookie-requests ()
-  "Preview bootstrap codes should not be accepted from cookie-authenticated requests."
+(ert-deftest doclive-test-route-request-allows-valid-cookie-bootstrap-redirect ()
+  "Cookie-authenticated bootstrap URLs should redirect to token-free previews."
   (let ((doclive--server-token "secret")
         (doclive--bootstrap-codes (make-hash-table :test #'equal))
         (sent nil)
@@ -1676,8 +1694,40 @@
        "/preview?id=abc&bootstrap=bootstrap-code"
        '(("cookie" . "doclive-token=secret")))
       (should deleted)
-      (should (string-match-p "403 Forbidden" (mapconcat #'identity sent "")))
-      (should (gethash "bootstrap-code" doclive--bootstrap-codes)))))
+      (let ((response (mapconcat #'identity sent "")))
+        (should (string-match-p "303 See Other" response))
+        (should (string-match-p (regexp-quote "Location: /preview?id=abc") response))
+        (should-not (string-match-p (regexp-quote "bootstrap-code") response)))
+      (should-not (gethash "bootstrap-code" doclive--bootstrap-codes)))))
+
+(ert-deftest doclive-test-route-request-allows-stale-cookie-bootstrap-redirect ()
+  "Valid bootstrap URLs should survive stale cookies from restarted servers."
+  (let ((doclive--server-token "new-secret")
+        (doclive--bootstrap-codes (make-hash-table :test #'equal))
+        (sent nil)
+        (deleted nil))
+    (puthash "bootstrap-code"
+             (list :id "abc" :expires (+ (float-time) 30))
+             doclive--bootstrap-codes)
+    (cl-letf (((symbol-function 'process-send-string)
+               (lambda (_proc string)
+                 (push string sent)))
+              ((symbol-function 'delete-process)
+               (lambda (_proc)
+                 (setq deleted t))))
+      (doclive--route-request
+       'fake-proc
+       "/preview?id=abc&bootstrap=bootstrap-code"
+       '(("cookie" . "doclive-token=old-secret")))
+      (should deleted)
+      (let ((response (mapconcat #'identity sent "")))
+        (should (string-match-p "303 See Other" response))
+        (should (string-match-p
+                 "Set-Cookie: doclive-token=new-secret; Path=/; SameSite=Strict; HttpOnly"
+                 response))
+        (should (string-match-p (regexp-quote "Location: /preview?id=abc") response))
+        (should-not (string-match-p (regexp-quote "bootstrap-code") response)))
+      (should-not (gethash "bootstrap-code" doclive--bootstrap-codes)))))
 
 (ert-deftest doclive-test-route-request-rejects-empty-query-segments ()
   "Authenticated routes should reject empty query strings or segments."
