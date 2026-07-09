@@ -107,6 +107,7 @@
               pkgs.writeShellScript "doclive-smoke" ''
                 export PATH=${pkgs.lib.makeBinPath [
                   pkgs.curl
+                  pkgs.perl
                   pkgs.zsh
                 ]}:$PATH
                 export EMACS=${pkgs.lib.getExe emacs}
@@ -215,6 +216,7 @@
             inherit src;
             nativeBuildInputs = [
               pkgs.curl
+              pkgs.perl
               pkgs.zsh
             ];
             env.EMACS = pkgs.lib.getExe emacs;
