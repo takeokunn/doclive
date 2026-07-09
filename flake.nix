@@ -111,6 +111,7 @@
                 ]}:$PATH
                 export EMACS=${pkgs.lib.getExe emacs}
                 export EMACSCLIENT=${pkgs.lib.getExe' emacs "emacsclient"}
+                export ZSH=${pkgs.lib.getExe pkgs.zsh}
                 ${make} smoke
               ''
             );
@@ -218,6 +219,7 @@
             ];
             env.EMACS = pkgs.lib.getExe emacs;
             env.EMACSCLIENT = pkgs.lib.getExe' emacs "emacsclient";
+            env.ZSH = pkgs.lib.getExe pkgs.zsh;
             buildPhase = ''
               make smoke
             '';

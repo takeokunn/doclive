@@ -1,4 +1,5 @@
 EMACS ?= emacs
+ZSH ?= zsh
 EMACS_BATCH = $(EMACS) -Q --batch -L . -L test
 
 SRC = doclive.el
@@ -54,7 +55,7 @@ security:
 	zizmor --offline .github/workflows
 
 smoke:
-	./scripts/daemon-smoke.sh
+	$(ZSH) ./scripts/daemon-smoke.sh
 
 clean:
 	rm -f *.elc test/*.elc doclive-autoloads.el
