@@ -8,7 +8,7 @@ experience, package quality, tests, or documentation.
 - Search existing issues and pull requests to avoid duplicated work.
 - For security-sensitive reports, do not open a public issue.  Follow
   =SECURITY.md= instead.
-- Keep compatibility with Emacs 28.1 unless the minimum version is
+- Keep compatibility with Emacs 29.1 unless the minimum version is
   intentionally changed in =doclive.el= and documented in the pull request.
 
 * Development setup
@@ -42,6 +42,7 @@ pre-commit run --all-files
 
 - Add or update ERT tests for behavior changes.
 - Run =make check= and include the result in the pull request.
+- Keep the daemon smoke test passing via =make smoke=.
 - Keep GitHub Actions changes passing =actionlint= and =zizmor=.
 - Keep secret scanning passing via =gitleaks detect --no-git --source .=.
 - Keep CDN/browser assets pinned to exact immutable versions.

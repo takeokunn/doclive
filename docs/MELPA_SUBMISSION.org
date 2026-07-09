@@ -15,7 +15,7 @@ Use this recipe in the MELPA repository:
 - Confirm AI assistance is attributed in the package header.
 - Run =make check= and confirm the canonical local release gate passes. This covers
   byte-compilation, ERT, checkdoc, package-lint, autoload generation, secret
-  scanning, actionlint, and zizmor.
+  scanning, actionlint, zizmor, and the daemon HTTP smoke test.
 - Run =git diff --check= and confirm no whitespace errors.
 - Build and install the package following MELPA's current CONTRIBUTING instructions.
 

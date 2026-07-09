@@ -165,6 +165,7 @@ make lint
 make package-lint
 make autoloads
 make security
+make smoke
 #+end_src
 
 =make security= は secret scan、GitHub Actions lint、workflow security scan を実行します。
@@ -175,24 +176,19 @@ pre-commit を使う場合は、同じ最終ゲートを hook から実行でき
 pre-commit run --all-files
 #+end_src
 
-Nix を使う場合は、compile / test / lint / package-lint / security を flake 経由でも確認できます。
+Nix を使う場合は、compile / test / lint / package-lint / security / smoke を flake 経由でも確認できます。
 PR や release 前には autoload 生成と whitespace も確認するため、最終ゲートとして =make check= も実行してください。
 
 #+begin_src sh
 nix flake check
 #+end_src
 
-プレビュー smoke では =example/sample.md= と =example/sample.org= を使います。
-自動ゲートは =make check= / =pre-commit run --all-files= / =nix flake check= で確認し、
-ブラウザ表示の smoke は下記コマンドでサーバ起動経路を検証します。
+プレビュー smoke では =example/sample.md= と =example/sample.org= を使い、daemon 起動、初回 bootstrap、cookie 認可、=/content=、=/events=、=/open=、force restart、停止経路を確認します。
+自動ゲートは =make check= / =pre-commit run --all-files= / =nix flake check= で確認できます。
+サーバ起動経路だけを単体で確認する場合は下記を実行してください。
 
 #+begin_src sh
-emacs -Q --batch -L . -l doclive.el \
-  --eval '(setq doclive-open-browser-function (lambda (_url) (princ "preview opened\n")))' \
-  --eval '(doclive-preview-file (expand-file-name "example/sample.md" default-directory))' \
-  --eval '(dotimes (_ 3) (accept-process-output nil 1))' \
-  --eval '(doclive-stop-server)' \
-  --eval '(kill-emacs)'
+make smoke
 #+end_src
 
 * Troubleshooting

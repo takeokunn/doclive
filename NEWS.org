@@ -52,7 +52,9 @@
   - Preview URLs now use short-lived single-use bootstrap codes instead of
     exposing the long-lived session token.
   - Session lifecycle management: buffer-kill cleanup, preview-mode disable cleanup, server-stop token invalidation, Emacs shutdown hook.
-  - Release gate includes byte-compilation, ERT tests, checkdoc, package-lint, autoload generation, whitespace checks, secret scanning, and GitHub Actions security checks.
+  - Release gate includes byte-compilation, ERT tests, checkdoc, package-lint,
+    autoload generation, daemon HTTP smoke testing, whitespace checks, secret
+    scanning, and GitHub Actions security checks.
   - Customizable host, port, browser-open function, and debounce delay.
   - Interactive commands: ~doclive-preview-buffer~ (C-u to restart server),
     ~doclive-preview-file~, ~doclive-stop-server~, ~doclive-reload-page~.

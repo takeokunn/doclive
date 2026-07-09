@@ -5,9 +5,9 @@ SRC = doclive.el
 TEST = test/doclive-test-helpers.el test/doclive-test.el
 AUTOLOAD_SYMBOLS = doclive-start-server doclive-stop-server doclive-preview-mode doclive-preview-buffer doclive-preview-file doclive-reload-page
 
-.PHONY: check compile test lint package-lint autoloads security clean
+.PHONY: check compile test lint package-lint autoloads security smoke clean
 
-check: compile test lint package-lint autoloads security
+check: compile test lint package-lint autoloads security smoke
 	git diff --check
 
 compile:
@@ -52,6 +52,9 @@ security:
 	gitleaks detect --no-git --source .
 	actionlint .github/workflows/*.yml
 	zizmor --offline .github/workflows
+
+smoke:
+	./scripts/daemon-smoke.sh
 
 clean:
 	rm -f *.elc test/*.elc doclive-autoloads.el

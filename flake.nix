@@ -26,10 +26,12 @@
           default = pkgs.mkShell {
             packages = [
               pkgs.actionlint
+              pkgs.curl
               emacs
               pkgs.gitleaks
               pkgs.gnumake
               pkgs.pre-commit
+              pkgs.zsh
               pkgs.zizmor
             ];
 
@@ -46,12 +48,14 @@
               echo "  make lint               Run checkdoc"
               echo "  make package-lint       Run package-lint"
               echo "  make security           Run secret and GitHub Actions security checks"
+              echo "  make smoke              Run daemon HTTP smoke test"
               echo "  pre-commit run --all-files"
               echo "  nix run .#compile       Byte-compile (standalone)"
               echo "  nix run .#test          Run tests (standalone)"
               echo "  nix run .#lint          Run checkdoc (standalone)"
               echo "  nix run .#package-lint  Run package-lint (standalone)"
               echo "  nix run .#security      Run security checks (standalone)"
+              echo "  nix run .#smoke         Run daemon HTTP smoke test"
               echo "  nix flake check         Run all checks (sandboxed)"
               echo ""
               echo "=== Manual testing ==="
@@ -97,6 +101,21 @@
             );
             meta.description = description;
           };
+          mkSmokeApp = {
+            type = "app";
+            program = toString (
+              pkgs.writeShellScript "doclive-smoke" ''
+                export PATH=${pkgs.lib.makeBinPath [
+                  pkgs.curl
+                  pkgs.zsh
+                ]}:$PATH
+                export EMACS=${pkgs.lib.getExe emacs}
+                export EMACSCLIENT=${pkgs.lib.getExe' emacs "emacsclient"}
+                ${make} smoke
+              ''
+            );
+            meta.description = "Run daemon HTTP smoke test";
+          };
         in
         {
           compile = mkApp emacs "compile" "Byte-compile doclive with warnings as errors";
@@ -108,6 +127,7 @@
             pkgs.gitleaks
             pkgs.zizmor
           ] "Run secret scanning and GitHub Actions security checks";
+          smoke = mkSmokeApp;
         }
       );
 
@@ -183,6 +203,23 @@
             ];
             buildPhase = ''
               make security
+            '';
+            installPhase = ''
+              touch $out
+            '';
+          };
+
+          smoke = pkgs.stdenvNoCC.mkDerivation {
+            name = "doclive-smoke";
+            inherit src;
+            nativeBuildInputs = [
+              pkgs.curl
+              pkgs.zsh
+            ];
+            env.EMACS = pkgs.lib.getExe emacs;
+            env.EMACSCLIENT = pkgs.lib.getExe' emacs "emacsclient";
+            buildPhase = ''
+              make smoke
             '';
             installPhase = ''
               touch $out

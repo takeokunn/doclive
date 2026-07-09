@@ -4,6 +4,8 @@ set -euo pipefail
 root=${0:A:h:h}
 server="doclive-smoke-$$"
 port=$((49152 + RANDOM % 10000))
+emacs_bin=${EMACS:-emacs}
+emacsclient_bin=${EMACSCLIENT:-emacsclient}
 tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/doclive-daemon-smoke.XXXXXX")
 open_url_file="$tmpdir/open-url.txt"
 cookie_file="$tmpdir/cookies.txt"
@@ -13,8 +15,8 @@ open_file="$tmpdir/open.json"
 events_file="$tmpdir/events.txt"
 
 cleanup() {
-  if emacsclient -s "$server" --eval t >/dev/null 2>&1; then
-    emacsclient -s "$server" --eval "(progn (ignore-errors (doclive-stop-server)) (kill-emacs 0))" >/dev/null 2>&1 || true
+  if "$emacsclient_bin" -s "$server" --eval t >/dev/null 2>&1; then
+    "$emacsclient_bin" -s "$server" --eval "(progn (ignore-errors (doclive-stop-server)) (kill-emacs 0))" >/dev/null 2>&1 || true
   fi
   rm -rf "$tmpdir"
 }
@@ -40,7 +42,7 @@ require_not_contains() {
 }
 
 emacs_eval() {
-  emacsclient -s "$server" --eval "$1"
+  "$emacsclient_bin" -s "$server" --eval "$1"
 }
 
 extract_id_from_url() {
@@ -79,7 +81,7 @@ fetch_content() {
   require_contains "$content_file" '"contentKind"'
 }
 
-emacs -Q --daemon="$server" >/dev/null
+"$emacs_bin" -Q --daemon="$server" >/dev/null
 
 emacs_eval "(progn
   (add-to-list 'load-path \"$root\")
