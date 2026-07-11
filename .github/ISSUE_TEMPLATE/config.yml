@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability report
+    url: https://github.com/takeokunn/doclive/security/advisories/new
+    about: >-
+      Do not report security vulnerabilities in public issues.
+      Use GitHub private vulnerability reporting instead (see SECURITY.md).
+  - name: Question / Support
+    url: https://github.com/takeokunn/doclive/blob/main/SUPPORT.md
+    about: Read the support policy before asking usage questions.

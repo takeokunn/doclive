@@ -12,7 +12,6 @@ Use this recipe in the MELPA repository:
 
 - Confirm the package is released under GPL-3.0-or-later.
 - Confirm =doclive.el= has lexical binding, package metadata, commentary, and autoloads.
-- Confirm AI assistance is attributed in the package header.
 - Run =make check= and confirm the canonical local release gate passes. This covers
   byte-compilation, ERT, checkdoc, package-lint, autoload generation, secret
   scanning, actionlint, zizmor, and the daemon HTTP smoke test.

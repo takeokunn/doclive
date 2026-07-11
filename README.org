@@ -1,36 +1,53 @@
 #+TITLE: doclive
+#+OPTIONS: toc:2
 
 [[https://github.com/takeokunn/doclive/actions/workflows/ci.yml][https://github.com/takeokunn/doclive/actions/workflows/ci.yml/badge.svg]]
+[[https://www.gnu.org/licenses/gpl-3.0][https://img.shields.io/badge/License-GPL_v3+-blue.svg]]
+[[https://www.gnu.org/software/emacs/][https://img.shields.io/badge/Emacs-29.1+-7F5AB6.svg]]
+
+日本語版は [[file:README.ja.org][README.ja.org]] を参照してください。
 
 * Overview
 
-doclive は、Markdown / Org を Emacs の xwidget WebKit で可視化するライブプレビュー用 Elisp パッケージです。
-SSE で更新を配信し、Emacs 内で扱いやすいようにリアルタイム同期します。
-AI が生成した Mermaid 図や LaTeX 数式（equation, align, gather, cases など）を網羅的に可視化できます。
+doclive is a live-preview Emacs package that renders Markdown and Org
+documents in an xwidget WebKit buffer inside Emacs (or an external
+browser as a fallback).  Edits are pushed to the preview in real time
+over Server-Sent Events, so the rendered page stays in sync while you
+type — no manual refresh.
+
+It is built for reviewing AI-generated documents: Mermaid diagrams and
+LaTeX math (=equation=, =align=, =gather=, =cases=, and more) render
+comprehensively out of the box.
+
+[[file:docs/images/preview-dark.png]]
+
+Light theme:
+
+[[file:docs/images/preview-light.png]]
 
 * Features
 
-- SSE によるライブ更新（150ms デバウンス付き）
-- xwidget WebKit による Emacs 内プレビュー（未対応 Emacs では外部ブラウザへフォールバック）
-- Markdown と Org のプレビュー表示
-- Mermaid 図（バッククォート・チルダフェンス、mmd エイリアス対応）
-- KaTeX 数式（equation, align, gather, cases など LaTeX 環境を網羅的にサポート）
-- Highlight.js によるシンタックスハイライト
-- Markdown / Org のローカル相対リンク遷移 + 戻る/進む
-- TOC サイドバー
-- コードコピー
-- 検索 + ピン留めハイライト
-- テーマ切替（Dark / Light）+ コネクション状態表示
-- ズーム
-- バッファ削除時の自動クリーンアップ
-- Emacs 終了時のサーバー自動停止
+- Live updates over SSE with a 150 ms debounce
+- In-Emacs preview via xwidget WebKit, falling back to an external
+  browser on Emacs builds without xwidget support
+- Markdown and Org rendering (Org exports through built-in =ox-html=,
+  never executing Babel blocks)
+- Mermaid diagrams (backtick and tilde fences, =mmd= alias)
+- KaTeX math with comprehensive LaTeX environment support
+- Syntax highlighting via highlight.js
+- Local relative-link navigation between =.md= / =.org= files with
+  back/forward history
+- TOC sidebar, code-copy buttons, full-text search with pinned
+  highlights, dark/light theme toggle, zoom, connection indicator
+- Automatic cleanup on buffer kill and Emacs shutdown
 
 * Installation
 
+Requires Emacs 29.1 or later.
+
 ** MELPA
 
-MELPA へ登録後は次の手順でインストールできます。
-登録前に試す場合は [[*From source checkout][From source checkout]] を使ってください。
+Once doclive is available on MELPA:
 
 #+begin_src emacs-lisp
 (require 'package)
@@ -47,14 +64,7 @@ MELPA へ登録後は次の手順でインストールできます。
   :commands (doclive-preview-buffer doclive-preview-file doclive-stop-server doclive-reload-page))
 #+end_src
 
-** Manual
-
-#+begin_src emacs-lisp
-(add-to-list 'load-path "/path/to/doclive")
-(require 'doclive)
-#+end_src
-
-** From source checkout
+** From a source checkout
 
 #+begin_src emacs-lisp
 (add-to-list 'load-path "/path/to/doclive")
@@ -63,172 +73,247 @@ MELPA へ登録後は次の手順でインストールできます。
 
 * Usage
 
-** 現在の Markdown / Org バッファをプレビュー
+| Command                   | Description                                              |
+|---------------------------+----------------------------------------------------------|
+| =doclive-preview-buffer=  | Preview the current Markdown/Org buffer (=C-u= restarts the server first) |
+| =doclive-preview-file=    | Prompt for a =.md= / =.org= file and preview it          |
+| =doclive-reload-page=     | Force-push the latest snapshot to the preview            |
+| =doclive-stop-server=     | Stop the local preview server                            |
 
-Markdown または Org バッファで次を実行します。
+** Previewing the current buffer
+
+In a Markdown or Org buffer:
 
 #+begin_example
 M-x doclive-preview-buffer
 #+end_example
 
-=C-u M-x doclive-preview-buffer= でサーバーを再起動してからプレビューを開きます。
+Use =C-u M-x doclive-preview-buffer= to restart the server before
+opening the preview.
 
-** ファイル指定でプレビュー
+** Keybindings
 
-=.md= / =.org= ファイルを指定してプレビューできます。
+doclive deliberately ships no default keybindings, so it never clobbers
+your keymaps.  Bind the commands you use to keys you prefer, for example:
 
-#+begin_example
-M-x doclive-preview-file
-#+end_example
+#+begin_src emacs-lisp
+(with-eval-after-load 'doclive
+  (define-key markdown-mode-map (kbd "C-c C-v") #'doclive-preview-buffer)
+  (define-key org-mode-map      (kbd "C-c C-v") #'doclive-preview-buffer))
+#+end_src
 
-** ローカルリンク遷移
+The preview page itself has in-page controls (search, pin, theme, zoom,
+back/forward) that need no Emacs bindings.
 
-プレビュー内の =.md= / =.org= への相対リンクをクリックすると、同じ doclive 画面内でリンク先を開きます。
-fragment や query はファイル解決時には無視され、remote URL や未対応拡張子は開きません。
-既定では、リンク先はクリック元ファイルのディレクトリ配下に限定されます。
-=../notes.md= のように親ディレクトリへ出るリンクを許可したい場合は、信頼できる文書だけで =doclive-allow-linked-document-parent-directory= を有効にしてください。
+** Local link navigation
+
+Clicking a relative link to a =.md= / =.org= file inside the preview
+opens the target in the same doclive page.  Fragments and query strings
+are ignored during file resolution; remote URLs and unsupported
+extensions never open.  By default, link targets are confined to the
+directory of the clicking document (checked against symlink-resolved
+real paths).  To allow links that escape to parent directories — for
+example =../notes.md= — enable
+=doclive-allow-linked-document-parent-directory= for trusted documents
+only.
 
 #+begin_src org
 [[file:example/sample.md][Markdown sample]]
 [[file:example/sample.org][Org sample]]
 #+end_src
 
-** サーバー停止
+** Stopping the server
 
 #+begin_example
 M-x doclive-stop-server
 #+end_example
 
-サーバー停止時には現在の session cookie と未使用の bootstrap code が破棄されるため、既存の初回 preview URL は次回起動後に使い回せません。
-
-** プレビュー再読み込み
-
-現在のバッファの最新スナップショットを強制的にプッシュします。
-
-#+begin_example
-M-x doclive-reload-page
-#+end_example
+Stopping the server discards the current session cookie and any unused
+bootstrap codes, so previously issued first-preview URLs cannot be
+reused after a restart.
 
 * Customization
 
-- =doclive-host= : bind host
-- =doclive-port= : bind port
-- =doclive-open-browser-function= : URL オープン関数（既定は xwidget 優先）
-- =doclive-change-debounce-ms= : 変更検知のデバウンス間隔（ms、既定 150）
-- =doclive-preview-asset-urls= : ブラウザ側で読む marked.js / KaTeX / Mermaid / highlight.js の資源 URL
-- =doclive-allow-linked-document-parent-directory= : ローカルリンク遷移でクリック元ディレクトリ外の Markdown / Org を開くかどうか（既定 nil）
+| Variable                                          | Default       | Description                                                    |
+|---------------------------------------------------+---------------+----------------------------------------------------------------|
+| =doclive-host=                                    | =127.0.0.1=   | Bind host                                                      |
+| =doclive-allow-non-loopback-host=                 | =nil=         | Allow binding to non-loopback hosts                            |
+| =doclive-port=                                    | =39123=       | Bind port                                                      |
+| =doclive-open-browser-function=                   | xwidget-first | Function used to open the preview URL                          |
+| =doclive-change-debounce-ms=                      | =150=         | Debounce interval for change detection (ms)                    |
+| =doclive-preview-asset-urls=                      | pinned CDN    | marked.js / KaTeX / Mermaid / highlight.js asset URLs          |
+| =doclive-allow-linked-document-parent-directory=  | =nil=         | Allow linked-document navigation outside the source directory  |
 
 * Security model
 
-doclive はローカルHTTPサーバーを起動し、既定では =127.0.0.1= に bind します。
-初回プレビューURLには長寿命の session token ではなく、短命・単回使用の =short-lived single-use bootstrap code= が含まれます。
-有効な bootstrap code で =/preview= に到達すると、サーバーは =HttpOnly= / =SameSite=Strict= の =doclive-token= Cookie を設定し、=token-free preview URL= へ redirect します。
-この Cookie は既定の plain HTTP / loopback-only サーバーで動作させるため =Secure= 属性を付けません。非loopback host を明示的に許可する場合は、そのネットワーク経路を信頼済みとして扱うか、必要に応じて外側で transport protection を用意してください。
-以後の =/content= / =/open= / =/events= は query token ではなく Cookie で認可します。
-=token= query parameter を含む request は、有効な Cookie があっても拒否します。
-URL / SSE / JSON payload に出る buffer id は、buffer ごとの opaque random routing identifier です。
-これは認可秘密ではなく、ローカルファイルパスや buffer 名から生成しません。
-サーバー停止時には session token と未使用の bootstrap code を破棄し、次回起動時に新しい session token を生成します。
-また、バッファで =doclive-preview-mode= を無効化すると、そのバッファの preview entry、SSE client、更新 timer を削除し、以後は配信対象から外します。
-未使用の bootstrap code を含むURLは共有・ログ貼り付け・公開スクリーンショットへの写り込みを避けてください。
-preview HTML と HTTP response は =no-referrer= を設定し、bootstrap code を含む初回URLが外部CDNへの Referer として送られないようにします。
-inline runtime script と style は session cookie とは別の response-local nonce で許可され、request-line は origin-form の絶対パスだけを受け付けます。
+doclive starts a local HTTP server bound to =127.0.0.1= by default.
 
-非loopback hostに bind すると、同一ネットワーク上のブラウザからも到達可能になります。
-必要な場合だけ =doclive-host= を変更し、=doclive-allow-non-loopback-host= を非nilにしてください。
-preview URL は信頼できる相手以外へ渡さないでください。
+- The first preview URL carries a short-lived, single-use bootstrap
+  code instead of a long-lived session token.  A valid bootstrap
+  request sets an =HttpOnly= / =SameSite=Strict= =doclive-token= cookie
+  and redirects to a token-free preview URL.
+- The cookie intentionally omits =Secure= because the server is plain
+  HTTP and loopback-only by default.  If you explicitly opt into a
+  non-loopback host, treat that network path as trusted or provide
+  transport protection externally.
+- Subsequent =/content=, =/open=, and =/events= requests are authorized
+  by the cookie, never by query tokens.  Requests carrying a =token=
+  query parameter are rejected even with a valid cookie.
+- Buffer IDs appearing in URLs, SSE streams, and JSON payloads are
+  opaque per-buffer random routing identifiers — not authorization
+  secrets, and never derived from file paths or buffer names.
+- Stopping the server discards the session token and unused bootstrap
+  codes; a fresh token is generated on the next start.  Disabling
+  =doclive-preview-mode= in a buffer removes its preview entry, SSE
+  clients, and update timer.
+- Avoid sharing first-preview URLs (they contain unused bootstrap
+  codes) in logs, pasted output, or public screenshots.  Preview HTML
+  and HTTP responses set =no-referrer= so bootstrap URLs are not leaked
+  to external CDNs via the Referer header.
+- The inline runtime script is allowed through a response-local CSP
+  nonce (separate from the session cookie), and request lines accept
+  only origin-form absolute paths.  Inline scripts are never allowed
+  without the nonce.
+- =style-src= allows inline styles because KaTeX and Mermaid position
+  rendered output through generated style attributes and SVG style
+  elements, which CSP nonces cannot authorize.  To keep untrusted
+  documents out of that allowance, the sanitizer removes =style=
+  elements and =style= attributes from document-derived HTML before DOM
+  insertion; trusted Mermaid SVG output (generated with
+  =securityLevel: strict=) keeps its own styles.
 
-ブラウザ資源は既定で pinned CDN URL を使います。
-=doclive-preview-asset-urls= は自前ミラーやローカル配信先に差し替えられますが、指定できるのは =https:= / =http:= の絶対URL、または同一オリジンの相対URLだけです。
-=file:= / =ftp:= / =javascript:= / =vbscript:= / =data:= / =//= から始まる protocol-relative URL、バックスラッシュを含むURLは拒否され、Content-Security-Policy は設定された資源URLの origin から生成されます。
-また、文書本文から生成された =href= / =src= / =xlink:href= / =formaction= / =action= / =poster= は、相対リンク・アンカー・=http:= / =https:= だけを保持し、=mailto:= は =href= / =xlink:href= のみで許可します。その他の scheme、protocol-relative URL、バックスラッシュ、制御文字・空白を含むURLは DOM 挿入前に削除します。
-=srcset= は複合URLリストとして解釈が必要なため、DOM 挿入前に削除します。
+Binding to a non-loopback host makes the server reachable from other
+browsers on the same network.  Change =doclive-host= only when needed,
+set =doclive-allow-non-loopback-host= to non-nil explicitly, and never
+hand preview URLs to untrusted parties.
 
-ローカルリンク遷移は既定でクリック元ファイルのディレクトリ配下に限定されます。
-この判定はシンボリックリンク解決後の実パスで行うため、クリック元ディレクトリ内のリンク名が外部ファイルを指していても既定では開きません。
-これにより、外部から受け取った文書内の =../secret.md= や外部ファイルへ向くシンボリックリンクを誤クリックして、意図しないローカル Markdown / Org をプレビューへ読み込むリスクを下げます。
+Browser assets default to pinned CDN URLs.  =doclive-preview-asset-urls=
+accepts your own mirror or a local origin, but only absolute =https:= /
+=http:= URLs or same-origin relative URLs.  =file:=, =ftp:=,
+=javascript:=, =vbscript:=, =data:=, protocol-relative =//= URLs, and
+backslash-bearing URLs are rejected, and the Content-Security-Policy is
+generated from the configured asset origins.
+
+URL attributes produced from document content (=href=, =src=,
+=xlink:href=, =formaction=, =action=, =poster=) keep only relative
+links, anchors, and =http:= / =https:= URLs; =mailto:= is allowed for
+=href= / =xlink:href= only.  Other schemes, protocol-relative URLs,
+backslashes, and control/whitespace-bearing URLs are removed before DOM
+insertion.  =srcset= is removed because it is a compound URL list.
+
+Linked-document navigation is confined to the clicking document's
+directory by default, checked after symlink resolution, so a link name
+inside the directory that points at an outside file will not open.
+
+See [[file:SECURITY.md][SECURITY.md]] for the reporting process and the full boundary
+description.
+
+* Comparison with alternatives
+
+- =markdown-preview-mode= / =grip= :: render Markdown only; doclive
+  also renders Org, Mermaid, and KaTeX, and keeps both formats live
+  over one SSE server.
+- =org-preview-html= :: exports Org to a static file per change;
+  doclive pushes incremental updates without touching the filesystem.
+- doclive intentionally stays out of WebSocket transport, remote file
+  fetch, Org Babel execution, and Org publishing pipelines (see
+  [[*Scope][Scope]]).
 
 * Development
 
-基本ゲートは Makefile から実行します。
+The canonical local gate:
 
 #+begin_src sh
 make check
 #+end_src
 
-=make check= は以下をまとめて実行します。
+=make check= runs compile, test, lint, package-lint, autoloads,
+security (secret scan, GitHub Actions lint, workflow security scan),
+and the daemon smoke test.  Use =nix develop= to get all CLI tools, or
+run the same gates through =nix flake check= / =pre-commit run
+--all-files=.
 
-#+begin_src sh
-make compile
-make test
-make lint
-make package-lint
-make autoloads
-make security
-make smoke
-#+end_src
-
-=make security= は secret scan、GitHub Actions lint、workflow security scan を実行します。
-これらの CLI を個別に導入しない場合は =nix develop= で開発環境に入ってください。
-pre-commit を使う場合は、同じ最終ゲートを hook から実行できます。
-
-#+begin_src sh
-pre-commit run --all-files
-#+end_src
-
-Nix を使う場合は、compile / test / lint / package-lint / security / smoke を flake 経由でも確認できます。
-PR や release 前には autoload 生成と whitespace も確認するため、最終ゲートとして =make check= も実行してください。
-
-#+begin_src sh
-nix flake check
-#+end_src
-
-プレビュー smoke では =example/sample.md= と =example/sample.org= を使い、daemon 起動、初回 bootstrap、cookie 認可、=/content=、=/events=、=/open=、force restart、停止経路を確認します。
-自動ゲートは =make check= / =pre-commit run --all-files= / =nix flake check= で確認できます。
-サーバ起動経路だけを単体で確認する場合は下記を実行してください。
+The daemon smoke test uses =example/sample.md= and =example/sample.org=
+to exercise daemon startup, first bootstrap, cookie authorization,
+=/content=, =/events=, =/open=, force restart, and shutdown:
 
 #+begin_src sh
 make smoke
 #+end_src
+
+CI additionally verifies the declared minimum Emacs version (29.1),
+the latest stable release, and a development snapshot.
 
 * Troubleshooting
 
-- Mermaid / KaTeX / Highlight.js はブラウザ側で外部資源を読み込みます。描画されない場合はブラウザ console と network log を確認してください。
-- ネットワーク制約がある環境では =doclive-preview-asset-urls= を自前のミラーやローカル配信先に差し替えてください。
-- port conflict がある場合は =doclive-port= を別の値に変更してください。
-- Org preview は Emacs built-in の =org= / =ox-html= で HTML fragment に export します。preview 中に Babel source block は実行しません。
-- remote URL、=.el=、=.html=、=.pdf= などはローカルリンク遷移の対象外です。
+- Mermaid / KaTeX / highlight.js load from external CDNs in the
+  browser.  If rendering fails, check the browser console and network
+  log.
+- In network-restricted environments, point
+  =doclive-preview-asset-urls= at your own mirror or a local origin.
+- On a port conflict, change =doclive-port=.
+- Org preview exports through built-in =org= / =ox-html= as an HTML
+  fragment.  Babel source blocks are never executed during preview, and
+  =#+INCLUDE:= / =#+SETUPFILE:= directives are intentionally not
+  resolved so that untrusted documents cannot pull additional local
+  files into the preview.
+- Remote URLs and =.el= / =.html= / =.pdf= files are not valid
+  linked-document navigation targets.
+- Secure token generation requires =/dev/urandom= or an =openssl=
+  binary; on platforms with neither (for example stock Windows without
+  openssl on =PATH=), the server refuses to start.
+
+* FAQ
+
+- *The preview opens an external browser instead of showing inside
+  Emacs.* :: Your Emacs was built without xwidget WebKit support.
+  doclive falls back to =browse-url= automatically.  Rebuild Emacs
+  =--with-xwidgets= (and a WebKitGTK / WebKit backend) for the in-Emacs
+  preview.
+- *Diagrams or math do not render.* :: Mermaid, KaTeX, and highlight.js
+  load from CDNs in the browser.  On an offline or proxied network,
+  point =doclive-preview-asset-urls= at a local mirror or your proxy.
+- *Port 39123 is already in use.* :: Set =doclive-port= to a free port.
+  A bind failure now reports the port and remedy instead of a raw error.
+- *Why is Org Babel disabled, and =#+INCLUDE:= rejected?* :: doclive
+  renders untrusted, possibly AI-generated documents.  Babel execution,
+  Org =(eval …)= macros, =#+INCLUDE:=, and =#+SETUPFILE:= are refused so
+  that opening a document cannot run code or read arbitrary local files.
+- *Can I share a preview URL with a colleague?* :: No.  Preview URLs are
+  loopback-only by default and the first URL carries a single-use
+  bootstrap code.  See the Security model section.
 
 * Contributing
 
-コントリビューション手順、ローカル検証、レビュー観点は =CONTRIBUTING.org= を参照してください。
-ユーザーに見える変更は =NEWS.org= も更新してください。
+See [[file:CONTRIBUTING.org][CONTRIBUTING.org]] for the workflow, local verification, and review
+expectations, and update [[file:NEWS.org][NEWS.org]] for user-visible changes.
+Participation is governed by [[file:CODE_OF_CONDUCT.md][CODE_OF_CONDUCT.md]].
 
 * Security
 
-脆弱性の詳細を public issue に書かないでください。
-報告手順と現在のセキュリティ境界は =SECURITY.md= にまとめています。
+Do not put vulnerability details in public issues.  See
+[[file:SECURITY.md][SECURITY.md]] for the private reporting process.
 
 * Support
 
-質問、不具合報告、機能要望、脆弱性報告の切り分けは =SUPPORT.md= を参照してください。
+See [[file:SUPPORT.md][SUPPORT.md]] for how to route questions, bug reports, feature
+requests, and vulnerability reports.
 
 * License
 
-doclive は GPL-3.0-or-later で配布されています。
-詳細は =LICENSE= を参照してください。
+doclive is distributed under GPL-3.0-or-later.  See [[file:LICENSE][LICENSE]].
 
 * Scope
 
-MVP 内:
+In scope (MVP):
 
-- Markdown / Org のプレビュー表示
-- =.md= / =.org= のローカル相対リンク遷移
-- Mermaid、KaTeX、コードコピー、検索 / ピン留めハイライト
+- Markdown / Org preview
+- Local relative-link navigation for =.md= / =.org=
+- Mermaid, KaTeX, code copy, search / pinned highlights
 
-MVP 外:
+Out of scope:
 
-- WebSocket 化
-- remote file fetch
-- Org Babel 実行
-- Org-roam、agenda、PDF export、Org publishing
+- WebSocket transport
+- Remote file fetch
+- Org Babel execution
+- Org-roam, agenda, PDF export, Org publishing

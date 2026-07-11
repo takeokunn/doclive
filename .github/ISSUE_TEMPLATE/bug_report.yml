@@ -1,0 +1,73 @@
+name: Bug report
+description: Report a reproducible problem in doclive
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Thanks for taking the time to report a bug.
+        For security-sensitive reports, do **not** use this form;
+        follow [SECURITY.md](../blob/main/SECURITY.md) instead.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened, and what did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: >-
+        Minimal steps starting from `emacs -Q`, e.g. load doclive.el,
+        open example/sample.md, run M-x doclive-preview-buffer.
+      placeholder: |
+        1. emacs -Q -L . -l doclive.el example/sample.md
+        2. M-x doclive-preview-buffer
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: emacs-version
+    attributes:
+      label: Emacs version
+      description: Output of M-x emacs-version (doclive requires Emacs 29.1+)
+      placeholder: GNU Emacs 30.1 (build 1, aarch64-apple-darwin24.4.0) ...
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15.5 / Ubuntu 24.04 / ...
+    validations:
+      required: true
+  - type: dropdown
+    id: preview-target
+    attributes:
+      label: Preview frontend
+      options:
+        - xwidget WebKit (in-Emacs)
+        - External browser
+        - Both / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant doclive configuration
+      description: >-
+        Non-default values of doclive-host, doclive-port,
+        doclive-preview-asset-urls, doclive-open-browser-function, etc.
+        Do not paste preview URLs containing bootstrap codes.
+      render: emacs-lisp
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >-
+        Contents of *Messages*, and browser console/network output if the
+        preview page misbehaves. Redact tokens and bootstrap codes.
+      render: text

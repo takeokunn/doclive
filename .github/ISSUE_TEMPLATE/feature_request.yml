@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest an improvement to doclive
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Check the Scope section of README.org first — WebSocket transport,
+        remote file fetch, Org Babel execution, and Org publishing pipelines
+        are intentionally out of scope.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem would this feature solve? Who benefits?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How should it work? Include UI/command sketches if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds or other tools you tried.
+  - type: textarea
+    id: security
+    attributes:
+      label: Security impact
+      description: >-
+        doclive runs a local HTTP server rendering user content. Does this
+        feature broaden file access, network exposure, or rendered-content
+        capabilities? If so, how should it stay safe?

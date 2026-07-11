@@ -1,9 +1,41 @@
 #+TITLE: doclive NEWS - user-visible changes
 
-* 1.1.0 (unreleased)
+* 1.1.0 (2026-07-11)
 
   Initial release.
 
+  - Modern preview UI: compact monospace toolbar, Emacs-style bottom modeline
+    with connection state and scroll position (Top/NN%/Bot), table-of-contents
+    scroll spy, refined dark and light themes, and a focused reading column.
+  - KaTeX math layout and Mermaid diagram styling are no longer blocked by the
+    Content-Security-Policy: ~style-src~ allows inline styles for the trusted
+    KaTeX/Mermaid runtimes, while the sanitizer strips ~style~ elements and
+    ~style~ attributes from document-derived HTML before DOM insertion.
+    Inline scripts remain nonce-only.
+  - The default highlight.js asset URL now loads the browser bundle from
+    ~@highlightjs/cdn-assets~ instead of a CommonJS build that failed in
+    browsers.
+  - LaTeX ~\(...\)~ and ~\[...\]~ delimiters emitted by Org HTML export are
+    now recognized by KaTeX, so Org inline and display math render.
+  - Documents opened through in-preview link navigation now join the live
+    preview, so edits to the linked buffer push updates as well.
+  - A bind failure at server start (for example a busy port) now reports an
+    actionable error naming ~doclive-port~ instead of a raw process error.
+  - Percent-encoded query values decode as UTF-8, making linked navigation to
+    non-ASCII file names robust across platforms.
+  - Session tokens and CSP nonces read /dev/urandom directly when available
+    instead of spawning an openssl subprocess per request.
+  - ~doclive-stop-server~ also releases tracked buffer entries.
+  - All customization options declare ~:package-version~ metadata.
+  - Security: Org export now rejects ~(eval …)~ macros, ~#+INCLUDE:~, and
+    ~#+SETUPFILE:~ directives before rendering, so previewing an untrusted
+    document cannot execute Emacs Lisp or read arbitrary local files.
+  - Security: the pinned default browser assets carry Subresource Integrity
+    hashes, so a CDN compromise cannot substitute the preview scripts.
+  - Security: connections that do not finish their HTTP headers in time are
+    closed, and concurrent SSE clients per buffer are capped.
+  - Security: browser requests reporting a cross-port ~Sec-Fetch-Site~ are
+    rejected, since loopback ports do not provide site isolation.
   - Live preview of Markdown and Org documents via embedded HTTP server with SSE.
   - In-buffer preview using xwidget WebKit; falls back to external browser when xwidget is unavailable.
   - Markdown rendering via marked.js with syntax highlighting (highlight.js).

@@ -74,3 +74,23 @@ the pull request:
 
 User-visible changes should be added to =NEWS.org= under the current unreleased
 section.  Keep entries concise and written from the user's perspective.
+
+* Releases and versioning
+
+doclive follows semantic versioning: MAJOR for breaking user-visible or
+security-model changes, MINOR for new features, PATCH for fixes.
+
+To publish a release:
+
+1. Update the =Version:= header in =doclive.el= and retitle the unreleased
+   =NEWS.org= section to =* VERSION (YYYY-MM-DD)=.
+2. Run =make check= and merge to =main=.
+3. Tag the release commit as =vVERSION= and push the tag.
+
+The =Release= workflow verifies that the tag, the =Version:= header, and the
+=NEWS.org= section agree, reruns the release gate, and publishes a GitHub
+Release with notes extracted from =NEWS.org=.
+
+* Code of conduct
+
+Participation in this project is governed by =CODE_OF_CONDUCT.md=.
