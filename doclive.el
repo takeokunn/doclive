@@ -88,6 +88,7 @@
 (defcustom doclive-host "127.0.0.1"
   "Host address for doclive local server."
   :type 'string
+  :package-version '(doclive . "1.1.0")
   :group 'doclive)
 
 (defcustom doclive-allow-non-loopback-host nil
@@ -95,11 +96,13 @@
 Keep this nil unless you understand that the preview server grants
 cookie-authenticated access to local document contents."
   :type 'boolean
+  :package-version '(doclive . "1.1.0")
   :group 'doclive)
 
 (defcustom doclive-port 39123
   "Port for doclive local server."
-  :type 'integer
+  :type 'natnum
+  :package-version '(doclive . "1.1.0")
   :group 'doclive)
 
 (defun doclive-xwidget-available-p ()
@@ -127,19 +130,21 @@ cookie-authenticated access to local document contents."
 The default uses xwidget WebKit when available and falls back to
 `browse-url' otherwise."
   :type 'function
+  :package-version '(doclive . "1.1.0")
   :group 'doclive)
 
 (defcustom doclive-change-debounce-ms 150
   "Debounce delay in milliseconds for after-change snapshots.
 Lower values give faster preview but more CPU usage."
-  :type 'integer
+  :type 'natnum
+  :package-version '(doclive . "1.1.0")
   :group 'doclive)
 
 (defcustom doclive-preview-asset-urls
-  '((highlight-css . "https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/styles/github-dark.min.css")
+  '((highlight-css . "https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.11.1/styles/github-dark.min.css")
     (katex-css . "https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.css")
     (marked-script . "https://cdn.jsdelivr.net/npm/marked@18.0.5/lib/marked.umd.js")
-    (highlight-script . "https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/common.min.js")
+    (highlight-script . "https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.11.1/highlight.min.js")
     (katex-script . "https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.js")
     (katex-auto-render-script . "https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/contrib/auto-render.min.js")
     (mermaid-script . "https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.min.js"))
@@ -149,6 +154,7 @@ variable if you want to mirror the assets locally or swap CDNs.
 Each URL must be an absolute http(s) URL or a same-origin relative
 URL."
   :type '(alist :key-type symbol :value-type string)
+  :package-version '(doclive . "1.1.0")
   :group 'doclive)
 
 (defconst doclive--preview-asset-keys
@@ -166,6 +172,7 @@ URL."
 When nil, doclive opens linked Markdown and Org documents only when
 they resolve under the current document's directory."
   :type 'boolean
+  :package-version '(doclive . "1.1.0")
   :group 'doclive)
 
 (defvar doclive--server nil
@@ -194,6 +201,15 @@ they resolve under the current document's directory."
 
 (defvar doclive--max-request-bytes 16384
   "Maximum size of a buffered HTTP request header block.")
+
+(defconst doclive--request-header-timeout-seconds 10
+  "Seconds a connection may take to send its complete HTTP header block.
+Connections that do not finish their headers in time are closed to
+bound slow-request resource exhaustion.")
+
+(defconst doclive--max-sse-clients-per-buffer 32
+  "Maximum concurrent Server-Sent Events clients tracked per buffer.
+Requests beyond this bound are refused to cap descriptor exhaustion.")
 
 (defconst doclive--bootstrap-code-ttl-seconds 30
   "Lifetime in seconds for single-use preview bootstrap codes.")
@@ -310,7 +326,12 @@ they resolve under the current document's directory."
 
 (defun doclive--browser-content-security-policy (&optional script-nonce)
   "Return the Content-Security-Policy for the preview page.
-When SCRIPT-NONCE is safe for a CSP nonce, allow matching inline assets."
+When SCRIPT-NONCE is safe for a CSP nonce, allow matching inline scripts.
+Inline styles are allowed because KaTeX and Mermaid position rendered
+output through generated style attributes and SVG style elements, which
+CSP nonces cannot authorize; the preview sanitizer strips style elements
+and style attributes from document-derived HTML before DOM insertion, so
+this applies only to trusted runtime-generated styles."
   (let ((asset-sources (mapconcat #'identity
                                   (doclive--preview-asset-csp-sources)
                                   " "))
@@ -325,8 +346,7 @@ When SCRIPT-NONCE is safe for a CSP nonce, allow matching inline assets."
       "object-src 'none'"
       "img-src 'self' data: blob:"
       (concat "font-src " asset-sources " data:")
-      (concat "style-src " asset-sources
-              (if nonce (format " 'nonce-%s'" nonce) ""))
+      (concat "style-src " asset-sources " 'unsafe-inline'")
       (concat "script-src " asset-sources
               (if nonce (format " 'nonce-%s'" nonce) ""))
       "connect-src 'self'")
@@ -346,6 +366,36 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
       (error "Unsafe doclive preview asset URL for %S" key))
     (doclive--escape-html-attribute url)))
 
+(defconst doclive--preview-asset-integrity
+  '(("https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.11.1/styles/github-dark.min.css"
+     . "sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH")
+    ("https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.css"
+     . "sha384-vlBdW0r3AcZO/HboRPznQNowvexd3fY8qHOWkBi5q7KGgqJ+F48+DceybYmrVbmB")
+    ("https://cdn.jsdelivr.net/npm/marked@18.0.5/lib/marked.umd.js"
+     . "sha384-ZD0fTOwPMHi7zM6WTVIWJR21I07lq0ccnqz3J6WMvQKG9thh4y7TA1QE6PJu0Af8")
+    ("https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.11.1/highlight.min.js"
+     . "sha384-RH2xi4eIQ/gjtbs9fUXM68sLSi99C7ZWBRX1vDrVv6GQXRibxXLbwO2NGZB74MbU")
+    ("https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.js"
+     . "sha384-AtrdNsnxl/75rvBneBVH7DtOvCxSVahR2zWqle1coBKd8DEmLoviqNeJSx64gNAs")
+    ("https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/contrib/auto-render.min.js"
+     . "sha384-bjyGPfbij8/NDKJhSGZNP/khQVgtHUE5exjm4Ydllo42FwIgYsdLO2lXGmRBf5Mz")
+    ("https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.min.js"
+     . "sha384-T/0lMUdJpd2S1ZHtRiofG3htU3xPCrFVeAQ1UUE2TJwlEJSV5NUwn30kP28n238E"))
+  "Subresource Integrity hashes for the pinned default browser assets.
+Keyed by the exact default URL so that customized mirrors, which cannot
+share these hashes, simply load without an integrity attribute.")
+
+(defun doclive--preview-asset-integrity-attrs (key)
+  "Return SRI/crossorigin attributes for asset KEY, or an empty string.
+The attributes are emitted only when the configured URL matches the
+pinned default, so custom mirrors keep working."
+  (let ((hash (assoc-default (alist-get key doclive-preview-asset-urls)
+                             doclive--preview-asset-integrity)))
+    (if hash
+        (format " integrity='%s' crossorigin='anonymous'"
+                (doclive--escape-html-attribute hash))
+      "")))
+
 (defun doclive--hex-encode-string (string)
   "Return lowercase hexadecimal encoding of unibyte STRING."
   (mapconcat (lambda (byte) (format "%02x" byte)) string ""))
@@ -364,8 +414,11 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
       (error nil))))
 
 (defun doclive--random-token ()
-  "Return a high-entropy token string for local bearer authentication."
-  (or (let ((openssl (executable-find "openssl")))
+  "Return a high-entropy token string for local bearer authentication.
+Prefer /dev/urandom, which avoids spawning a subprocess per token, and
+fall back to openssl rand where /dev/urandom is unavailable."
+  (or (doclive--random-token-from-urandom)
+      (let ((openssl (executable-find "openssl")))
         (when openssl
           (condition-case nil
               (with-temp-buffer
@@ -377,8 +430,7 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
                     (when (string-match-p "\\`[0-9a-f]\\{64\\}\\'" token)
                       token))))
             (error nil))))
-      (doclive--random-token-from-urandom)
-      (user-error "Doclive requires openssl rand or /dev/urandom for secure tokens")))
+      (user-error "Doclive requires /dev/urandom or openssl rand for secure tokens")))
 
 (defun doclive--ensure-server-token ()
   "Return the session token for the local preview server."
@@ -550,22 +602,46 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
              (string-equal (downcase (or (file-name-extension buffer-file-name) ""))
                            "org")))))
 
+(defconst doclive--org-unsafe-directive-regexps
+  '(("eval macro" . "^[ \t]*#\\+MACRO:[ \t]*[^ \t\n]+[ \t]+(eval\\b")
+    ("INCLUDE directive" . "^[ \t]*#\\+INCLUDE:")
+    ("SETUPFILE directive" . "^[ \t]*#\\+SETUPFILE:"))
+  "Org directives that execute code or read files during export.
+These are rejected before export because Babel-disabling options do not
+gate the macro evaluator, file inclusion, or setup-file loading.")
+
+(defun doclive--org-unsafe-directive (text)
+  "Return a description of the first unsafe Org directive in TEXT, or nil."
+  (let ((case-fold-search t))
+    (cl-loop for (label . regexp) in doclive--org-unsafe-directive-regexps
+             when (string-match-p regexp text)
+             return label)))
+
 (defun doclive--org-to-html (text)
-  "Export Org TEXT to a safe HTML body fragment without Babel execution."
-  (let ((org-export-use-babel nil)
-        (org-confirm-babel-evaluate nil)
-        (org-export-allow-bind-keywords nil)
-        (org-export-with-broken-links 'mark)
-        (org-html-doctype "html5")
-        (org-html-html5-fancy t)
-        (org-html-validation-link nil)
-        (org-html-head-include-default-style nil)
-        (org-html-head-include-scripts nil))
-    (condition-case err
-        (org-export-string-as text 'html t '(:with-toc nil))
-      (error
-       (format "<pre class=\"doclive-export-error\">%s</pre>"
-               (doclive--escape-html (error-message-string err)))))))
+  "Export Org TEXT to a safe HTML body fragment without Babel execution.
+Reject documents containing directives that would execute Emacs Lisp or
+read local files during export, since Org's macro evaluator, `#+INCLUDE:',
+and `#+SETUPFILE:' run independently of Babel."
+  (let ((unsafe (doclive--org-unsafe-directive text)))
+    (if unsafe
+        (format "<pre class=\"doclive-export-error\">%s</pre>"
+                (doclive--escape-html
+                 (format "doclive refused to render an Org %s for security reasons"
+                         unsafe)))
+      (let ((org-export-use-babel nil)
+            (org-confirm-babel-evaluate nil)
+            (org-export-allow-bind-keywords nil)
+            (org-export-with-broken-links 'mark)
+            (org-html-doctype "html5")
+            (org-html-html5-fancy t)
+            (org-html-validation-link nil)
+            (org-html-head-include-default-style nil)
+            (org-html-head-include-scripts nil))
+        (condition-case err
+            (org-export-string-as text 'html t '(:with-toc nil))
+          (error
+           (format "<pre class=\"doclive-export-error\">%s</pre>"
+                   (doclive--escape-html (error-message-string err)))))))))
 
 (defun doclive--snapshot-buffer (buffer)
   "Capture BUFFER contents and notify clients."
@@ -610,13 +686,15 @@ SCRIPT-NONCE is forwarded to the Content-Security-Policy builder."
       target)))
 
 (defun doclive--decode-query-component (value)
-  "Decode query component VALUE.
+  "Decode query component VALUE as UTF-8 text.
 Return nil when VALUE is not valid percent-encoded data."
   (let ((raw (or value "")))
     (unless (string-match-p "%\\(?:\\'\\|[^[:xdigit:]]\\|[[:xdigit:]]\\'\\|[[:xdigit:]][^[:xdigit:]]\\)" raw)
       (condition-case _
-          (url-unhex-string
-           (replace-regexp-in-string "\\+" " " raw t t))
+          (decode-coding-string
+           (url-unhex-string
+            (replace-regexp-in-string "\\+" " " raw t t))
+           'utf-8 t)
         (error nil)))))
 
 (defun doclive--local-document-link-p (rel)
@@ -677,6 +755,8 @@ Return nil when VALUE is not valid percent-encoded data."
                return candidate))
      (t nil))))
 
+(defvar doclive-preview-mode)
+
 (defun doclive--open-linked-document (current-id rel)
   "Open REL Markdown or Org document linked from CURRENT-ID entry."
   (let* ((entry (doclive--get-entry current-id))
@@ -687,7 +767,10 @@ Return nil when VALUE is not valid percent-encoded data."
       (let ((enable-local-variables nil)
             (enable-local-eval nil))
         (let* ((buf (find-file-noselect full))
-               (new-entry (doclive--snapshot-buffer buf))
+               (new-entry (with-current-buffer buf
+                            (unless doclive-preview-mode
+                              (doclive-preview-mode 1))
+                            (doclive--snapshot-buffer buf)))
                (new-id (plist-get new-entry :id)))
           (json-encode `((ok . t)
                          (buffer_id . ,new-id)
@@ -749,74 +832,98 @@ runtime script and style when it is safe for CSP nonce use."
    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
    "<meta name='referrer' content='no-referrer'>"
    "<title>doclive</title><link rel='icon' href='data:,'>"
-   "<link rel='stylesheet' href='" (doclive--preview-asset-url 'highlight-css) "'>"
-   "<link rel='stylesheet' href='" (doclive--preview-asset-url 'katex-css) "'>"
-   "<style"
-   (let ((nonce (doclive--browser-script-nonce script-nonce)))
-     (if nonce (concat " nonce='" (doclive--escape-html-attribute nonce) "'") ""))
-   ">"
-   ":root{--bg:#09111f;--bg-2:#132235;--panel:#101827;--panel-strong:#172235;--surface-glass:rgba(16,24,39,.74);--text:#eef5ff;--muted:#9fb0c7;--border:rgba(175,194,220,.18);--accent:#5eead4;--accent-2:#f8b84e;--accent-ink:#062621;--danger:#ff6b6b;--shadow:0 24px 80px rgba(0,0,0,.34);--mark:#f8e16c;}"
-   "body[data-theme='light']{--bg:#f4efe6;--bg-2:#dbeafe;--panel:#fffaf0;--panel-strong:#ffffff;--surface-glass:rgba(255,250,240,.82);--text:#172033;--muted:#667085;--border:rgba(37,54,79,.16);--accent:#0f766e;--accent-2:#b45309;--accent-ink:#f5fffc;--danger:#b42318;--shadow:0 24px 70px rgba(80,64,38,.18);--mark:#ffe08a;}"
-   "*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;min-height:100vh;background:radial-gradient(circle at top left,rgba(94,234,212,.2),transparent 34rem),radial-gradient(circle at 85% 12%,rgba(248,184,78,.16),transparent 28rem),linear-gradient(135deg,var(--bg),var(--bg-2));color:var(--text);font-family:'Avenir Next','SF Pro Rounded','Segoe UI',sans-serif;}"
+   "<link rel='stylesheet' href='" (doclive--preview-asset-url 'highlight-css) "'"
+   (doclive--preview-asset-integrity-attrs 'highlight-css) ">"
+   "<link rel='stylesheet' href='" (doclive--preview-asset-url 'katex-css) "'"
+   (doclive--preview-asset-integrity-attrs 'katex-css) ">"
+   "<style>"
+   ":root{--mono:ui-monospace,'SF Mono','JetBrains Mono','Cascadia Code',Menlo,Consolas,monospace;--serif:'Iowan Old Style',Charter,'Source Serif 4',Georgia,serif;--bg:#0c0f14;--bg-raise:#11151d;--panel:#10141c;--surface-glass:rgba(12,15,20,.82);--text:#e9edf5;--muted:#8e98ac;--border:rgba(148,163,184,.16);--accent:#a78bfa;--accent-strong:#c4b0ff;--accent-ink:#160e33;--pin:#e0b458;--danger:#f87171;--mark:#f5d76e;--code-bg:#0d1117;--code-text:#e6edf3;--ok:#4ade80;}"
+   "body[data-theme='light']{--bg:#f7f6f2;--bg-raise:#fffefb;--panel:#fbfaf6;--surface-glass:rgba(247,246,242,.88);--text:#232733;--muted:#69707f;--border:rgba(35,39,51,.14);--accent:#6d3fc4;--accent-strong:#5b21b6;--accent-ink:#f4f0ff;--pin:#9a6a00;--danger:#b91c1c;--mark:#ffe08a;--code-bg:#14181f;--code-text:#e6edf3;--ok:#15803d;}"
+   "*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--serif);padding-bottom:48px;}"
    "button,input,select{font:inherit}button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
-   ".layout{display:grid;grid-template-columns:minmax(230px,300px) minmax(0,1fr);gap:clamp(18px,3vw,36px);min-height:100vh;padding:clamp(14px,2.4vw,32px);}"
-   ".toc{padding:18px;border:1px solid var(--border);border-radius:26px;background:linear-gradient(180deg,var(--surface-glass),rgba(16,24,39,.48));box-shadow:var(--shadow);backdrop-filter:blur(18px);overflow:auto;position:sticky;top:24px;height:calc(100vh - 48px);}"
-   ".toc h2{margin:0 0 14px;font-size:11px;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);}"
-   ".toc a{display:block;color:var(--text);text-decoration:none;padding:8px 10px;border-radius:12px;font-size:13px;line-height:1.35;opacity:.78;transition:background .18s ease,opacity .18s ease,transform .18s ease;}"
-   ".toc a:hover{background:rgba(94,234,212,.14);color:var(--text);opacity:1;transform:translateX(2px);}"
-   ".main{min-width:0;padding:4px 0 42px;}"
-   ".hero{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin:2px auto 18px;max-width:1100px;animation:doclive-rise .42s ease-out both;}"
-   ".eyebrow{margin:0 0 6px;color:var(--accent);font-size:11px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;}"
-   ".hero h1{margin:0;font-family:'Iowan Old Style','Charter','Source Serif 4',serif;font-size:clamp(30px,5vw,58px);line-height:.95;letter-spacing:-.04em;}"
-   ".status{font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center;border:1px solid var(--border);border-radius:999px;background:var(--surface-glass);padding:8px 12px;box-shadow:0 10px 30px rgba(0,0,0,.14);white-space:nowrap;}"
-   ".toolbar{position:sticky;top:16px;z-index:4;display:flex;flex-wrap:wrap;gap:10px;margin:0 auto 18px;align-items:center;max-width:1100px;padding:10px;border:1px solid var(--border);border-radius:22px;background:var(--surface-glass);box-shadow:var(--shadow);backdrop-filter:blur(20px);animation:doclive-rise .5s ease-out .05s both;}"
-   ".toolbar input,.toolbar button,.toolbar select{background:var(--panel-strong);color:var(--text);border:1px solid var(--border);border-radius:14px;padding:9px 12px;font-size:12px;min-height:36px;}"
-   ".toolbar input{min-width:min(280px,100%);flex:1 1 220px;background:linear-gradient(180deg,var(--panel-strong),var(--panel));}"
-   ".toolbar button{cursor:pointer;font-weight:700;letter-spacing:.01em;transition:transform .16s ease,background .16s ease,border-color .16s ease;}"
-   ".toolbar button:hover:not(:disabled){transform:translateY(-1px);border-color:color-mix(in oklab,var(--accent) 55%,var(--border));background:color-mix(in oklab,var(--accent) 16%,var(--panel-strong));}"
-   ".toolbar button:disabled{opacity:.42;cursor:not-allowed}.toolbar select{cursor:pointer}.toolbar .primary{background:linear-gradient(135deg,var(--accent),color-mix(in oklab,var(--accent) 64%,var(--accent-2)));color:var(--accent-ink);border-color:transparent;}"
+   ".layout{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:calc(100vh - 48px);}"
+   ".toc{border-right:1px solid var(--border);padding:22px 14px 22px 20px;position:sticky;top:0;height:calc(100vh - 32px);overflow:auto;font-family:var(--mono);}"
+   ".toc h2{margin:0 0 12px;font-size:10px;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--muted);}"
+   ".toc a{display:block;color:var(--muted);text-decoration:none;padding:5px 8px 5px 10px;border-left:2px solid transparent;font-size:12px;line-height:1.5;transition:color .15s ease,border-color .15s ease;}"
+   ".toc a:hover{color:var(--text);}"
+   ".toc a.active{color:var(--accent);border-left-color:var(--accent);}"
+   ".main{min-width:0;}"
+   ".toolbar{position:sticky;top:0;z-index:4;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 18px;border-bottom:1px solid var(--border);background:var(--surface-glass);backdrop-filter:blur(14px);font-family:var(--mono);}"
+   ".hero{display:flex;align-items:center;margin-right:10px;}"
+   ".wordmark{margin:0;font-size:12.5px;font-weight:600;letter-spacing:.04em;color:var(--text);font-family:var(--mono);white-space:nowrap;}"
+   ".caret{display:inline-block;width:.55em;height:1.05em;margin-left:3px;vertical-align:text-bottom;background:var(--accent);animation:doclive-blink 1.2s steps(2,start) infinite;}"
+   ".toolbar input,.toolbar button,.toolbar select{background:var(--bg-raise);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;min-height:32px;font-family:var(--mono);}"
+   ".toolbar input{min-width:min(240px,100%);flex:1 1 200px;}"
+   ".toolbar input::placeholder{color:var(--muted);}"
+   ".toolbar button{cursor:pointer;transition:border-color .15s ease,color .15s ease,filter .15s ease;}"
+   ".toolbar button:hover:not(:disabled){border-color:var(--accent);color:var(--accent);}"
+   ".toolbar button:disabled{opacity:.38;cursor:not-allowed}.toolbar select{cursor:pointer}"
+   ".toolbar .primary{background:var(--accent);border-color:transparent;color:var(--accent-ink);font-weight:700;}"
+   ".toolbar .primary:hover:not(:disabled){color:var(--accent-ink);border-color:transparent;filter:brightness(1.08);}"
    ".chips{display:flex;gap:6px;flex-wrap:wrap;min-width:0;}"
-   ".chip{border:1px solid var(--border);border-radius:999px;padding:5px 9px;font-size:11px;display:flex;gap:7px;align-items:center;background:color-mix(in oklab,var(--panel-strong) 76%,transparent);}"
-   ".chip b{font-weight:700;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}"
+   ".chip{border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;display:flex;gap:6px;align-items:center;background:var(--bg-raise);font-family:var(--mono);}"
+   ".chip b{font-weight:600;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--pin);}"
    ".chip-close{border:none;background:transparent;color:var(--muted);cursor:pointer;padding:0;font-size:13px;line-height:1;min-height:0;}"
-   ".dot{width:9px;height:9px;border-radius:999px;background:#35d07f;display:inline-block;box-shadow:0 0 0 6px rgba(53,208,127,.14);animation:doclive-pulse 1.8s ease-in-out infinite;}"
-   ".dot-disconnected{background:var(--danger);box-shadow:0 0 0 6px color-mix(in oklab,var(--danger) 18%,transparent);}"
-   ".md{max-width:1100px;margin:0 auto;padding:clamp(24px,4.4vw,54px);border:1px solid var(--border);border-radius:30px;background:linear-gradient(180deg,color-mix(in oklab,var(--panel-strong) 88%,transparent),color-mix(in oklab,var(--panel) 78%,transparent));box-shadow:var(--shadow);animation:doclive-rise .56s ease-out .1s both;}"
-   ".md{font-family:'Iowan Old Style','Charter','Source Serif 4',serif;font-size:17px;line-height:1.72}.md h1,.md h2,.md h3{font-family:'Avenir Next','SF Pro Rounded','Segoe UI',sans-serif;letter-spacing:-.035em;line-height:1.12}.md a{color:var(--accent);text-decoration-thickness:2px;text-underline-offset:3px}.md img{max-width:100%;border-radius:18px}"
-   ".md pre{position:relative;background:#06111f;padding:18px;border:1px solid rgba(94,234,212,.2);border-radius:18px;overflow:auto;box-shadow:inset 0 1px 0 rgba(255,255,255,.04);}"
-   "body[data-theme='light'] .md pre{background:#172033;color:#f8fafc;border-color:rgba(15,118,110,.24);}"
-   ".frontmatter{margin:0 0 18px;border:1px solid var(--border);border-radius:18px;overflow:hidden;background:color-mix(in oklab,var(--panel-strong) 84%,transparent);}"
-   ".frontmatter summary{cursor:pointer;padding:12px 14px;font-weight:800;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.12em;}"
+   ".chip-close:hover{color:var(--danger);}"
+   ".md{max-width:840px;margin:0 auto;padding:clamp(28px,5vw,56px) clamp(20px,4vw,40px) 72px;font-size:16.5px;line-height:1.75;animation:doclive-rise .4s ease-out both;}"
+   ".md h1,.md h2,.md h3,.md h4{font-family:var(--serif);letter-spacing:-.015em;line-height:1.2;scroll-margin-top:64px;}"
+   ".md h1{font-size:2.1rem;margin:0 0 .8em;}"
+   ".md h2{font-size:1.45rem;margin:2em 0 .7em;padding-bottom:.35em;border-bottom:1px solid var(--border);}"
+   ".md h3{font-size:1.15rem;margin:1.6em 0 .6em;}"
+   ".md a{color:var(--accent);text-decoration-thickness:1.5px;text-underline-offset:3px;}"
+   ".md a:hover{color:var(--accent-strong);}"
+   ".md img{max-width:100%;border-radius:8px;}"
+   ".md blockquote{margin:1.2em 0;padding:.2em 0 .2em 1.1em;border-left:3px solid var(--accent);color:var(--muted);}"
+   ".md hr{border:none;border-top:1px solid var(--border);margin:2.4em 0;}"
+   ".md pre{position:relative;background:var(--code-bg);color:var(--code-text);padding:16px 18px;border:1px solid var(--border);border-radius:10px;overflow:auto;font-size:13px;line-height:1.6;}"
+   ".md pre,.md code,.md kbd{font-family:var(--mono);}"
+   ".mermaid-holder{background:var(--code-bg);padding:14px;border:1px solid var(--border);border-radius:10px;overflow:auto;margin:1.2em 0;}"
+   ".md :not(pre)>code{background:color-mix(in oklab,var(--accent) 12%,transparent);border-radius:4px;padding:.12em .35em;font-size:.86em;}"
+   ".md table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.92em;}"
+   ".md th{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:left;}"
+   ".md th,.md td{border:1px solid var(--border);padding:8px 10px;}"
+   ".frontmatter{margin:0 0 20px;border:1px solid var(--border);border-radius:10px;overflow:hidden;font-family:var(--mono);}"
+   ".frontmatter summary{cursor:pointer;padding:10px 12px;font-weight:600;color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.18em;}"
    ".frontmatter table{margin:0;border-collapse:collapse;width:100%;}"
-   ".frontmatter th,.frontmatter td{border-top:1px solid var(--border);padding:9px 12px;text-align:left;font-size:12px;}"
-   ".copy-btn{position:absolute;top:10px;right:10px;background:var(--accent);color:var(--accent-ink);border:none;border-radius:999px;padding:6px 11px;font-size:12px;font-weight:800;cursor:pointer;box-shadow:0 8px 20px rgba(0,0,0,.2);}"
-   ".copy-btn:hover{filter:brightness(1.06);}"
+   ".frontmatter th,.frontmatter td{border-top:1px solid var(--border);padding:8px 12px;text-align:left;font-size:12px;}"
+   ".copy-btn{position:absolute;top:8px;right:8px;background:var(--bg-raise);color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:4px 9px;font-size:11px;font-family:var(--mono);cursor:pointer;}"
+   ".copy-btn:hover{color:var(--accent);border-color:var(--accent);}"
    ".mark-pin-0{background:var(--mark);color:#111}.mark-pin-1{background:#ffd180;color:#111}.mark-pin-2{background:#b9f6ca;color:#111}.mark-pin-3{background:#80d8ff;color:#111}"
-   ".render-error{background:color-mix(in oklab,var(--danger) 12%,var(--panel));border:1px solid var(--danger);border-radius:18px;padding:14px;margin:8px 0;font-family:'SF Mono','Cascadia Code',monospace;font-size:12px;color:var(--danger);overflow:auto;white-space:pre-wrap;}"
-   ".render-error::before{content:'⚠ Render error';display:block;font-weight:800;margin-bottom:8px;color:var(--danger);}"
-   "body[data-theme='light'] .render-error{background:#fff5f5;border-color:var(--danger);color:var(--danger);}"
-   "body[data-theme='light'] .render-error::before{color:var(--danger);}"
-   ".md table{border-collapse:collapse;width:100%;}.md th,.md td{border:1px solid var(--border);padding:8px 10px;}"
-   "@keyframes doclive-rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}@keyframes doclive-pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(.82);opacity:.72}}"
+   ".render-error{background:color-mix(in oklab,var(--danger) 10%,transparent);border:1px solid var(--danger);border-radius:10px;padding:14px;margin:8px 0;font-family:var(--mono);font-size:12px;color:var(--danger);overflow:auto;white-space:pre-wrap;}"
+   ".render-error::before{content:'⚠ Render error';display:block;font-weight:700;margin-bottom:8px;}"
+   ".modeline{position:fixed;left:0;right:0;bottom:0;z-index:5;display:flex;gap:10px;align-items:center;height:32px;padding:0 14px;border-top:1px solid var(--border);background:var(--panel);font-family:var(--mono);font-size:11.5px;color:var(--muted);}"
+   ".modeline .spacer{flex:1}"
+   "#scrollpos{color:var(--text);min-width:3.5ch;text-align:right;}"
+   ".dot{width:8px;height:8px;border-radius:999px;background:var(--ok);display:inline-block;flex:none;box-shadow:0 0 0 4px color-mix(in oklab,var(--ok) 20%,transparent);}"
+   ".dot-disconnected{background:var(--danger);box-shadow:0 0 0 4px color-mix(in oklab,var(--danger) 20%,transparent);}"
+   "@keyframes doclive-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}"
+   "@keyframes doclive-blink{50%{opacity:0}}"
    "@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}"
-   "@media (max-width:980px){.layout{grid-template-columns:1fr;padding:12px}.toc{position:relative;top:auto;height:auto;max-height:240px;border-radius:22px}.hero{align-items:flex-start;flex-direction:column}.toolbar{top:8px}.main{padding:0}.md{border-radius:22px}}"
+   "@media (max-width:980px){.layout{grid-template-columns:1fr}.toc{position:relative;top:auto;height:auto;max-height:240px;border-right:none;border-bottom:1px solid var(--border)}.md{padding:24px 16px 64px}}"
    "</style></head><body>"
    "<div class='layout'><aside class='toc'><h2>Outline</h2><nav id='toc'></nav></aside>"
-   "<main class='main'><header class='hero'><div><p class='eyebrow'>Live document preview</p><h1>doclive workspace</h1></div><div class='status'><span class='dot' id='dot'></span><span id='status'>connecting…</span></div></header>"
+   "<main class='main'>"
    "<div class='toolbar' role='toolbar' aria-label='Preview controls'>"
-   "<button id='back'>←</button><button id='forward'>→</button>"
-   "<input id='search' placeholder='Find in page'>"
+   "<header class='hero'><h1 class='wordmark'>doclive workspace<span class='caret' aria-hidden='true'></span></h1></header>"
+   "<button id='back' aria-label='Back'>←</button><button id='forward' aria-label='Forward'>→</button>"
+   "<input id='search' placeholder='Find in page' aria-label='Find in page'>"
    "<button id='pin' class='primary'>Pin</button>"
    "<span class='chips' id='chips'></span>"
-   "<select id='theme'><option value='dark'>Dark</option><option value='light'>Light</option></select>"
-   "<button id='zoom-out'>A-</button><button id='zoom-reset'>A</button><button id='zoom-in'>A+</button>"
+   "<select id='theme' aria-label='Theme'><option value='dark'>Dark</option><option value='light'>Light</option></select>"
+   "<button id='zoom-out' aria-label='Zoom out'>A-</button><button id='zoom-reset' aria-label='Reset zoom'>A</button><button id='zoom-in' aria-label='Zoom in'>A+</button>"
    "</div>"
    "<article id='md' class='md'></article></main></div>"
-   "<script src='" (doclive--preview-asset-url 'marked-script) "'></script>"
-   "<script src='" (doclive--preview-asset-url 'highlight-script) "'></script>"
-   "<script src='" (doclive--preview-asset-url 'katex-script) "'></script>"
-   "<script src='" (doclive--preview-asset-url 'katex-auto-render-script) "'></script>"
-   "<script src='" (doclive--preview-asset-url 'mermaid-script) "'></script>"
+   "<footer class='modeline'><span class='dot' id='dot'></span><span id='status'>connecting…</span><span class='spacer'></span><span id='scrollpos'>Top</span></footer>"
+   "<script src='" (doclive--preview-asset-url 'marked-script) "'"
+   (doclive--preview-asset-integrity-attrs 'marked-script) "></script>"
+   "<script src='" (doclive--preview-asset-url 'highlight-script) "'"
+   (doclive--preview-asset-integrity-attrs 'highlight-script) "></script>"
+   "<script src='" (doclive--preview-asset-url 'katex-script) "'"
+   (doclive--preview-asset-integrity-attrs 'katex-script) "></script>"
+   "<script src='" (doclive--preview-asset-url 'katex-auto-render-script) "'"
+   (doclive--preview-asset-integrity-attrs 'katex-auto-render-script) "></script>"
+   "<script src='" (doclive--preview-asset-url 'mermaid-script) "'"
+   (doclive--preview-asset-integrity-attrs 'mermaid-script) "></script>"
    "<script"
    (let ((nonce (doclive--browser-script-nonce script-nonce)))
      (if nonce (concat " nonce='" (doclive--escape-html-attribute nonce) "'") ""))
@@ -826,7 +933,12 @@ runtime script and style when it is safe for CSP nonce use."
    "const statusEl=document.getElementById('status'); const mdEl=document.getElementById('md'); const tocEl=document.getElementById('toc');"
    "const searchEl=document.getElementById('search'); const pinEl=document.getElementById('pin'); const chipsEl=document.getElementById('chips');"
    "const themeEl=document.getElementById('theme'); const dotEl=document.getElementById('dot');"
+   "const scrollPosEl=document.getElementById('scrollpos');"
    "let lastRev=-1;"
+   "let scrollTick=false;"
+   "function updateScrollPos(){const doc=document.documentElement; const max=doc.scrollHeight-doc.clientHeight; let label; if(max<=4){label='All';}else{const y=window.scrollY||doc.scrollTop; if(y<=2){label='Top';}else if(y>=max-2){label='Bot';}else{label=Math.round((y/max)*100)+'%';}} scrollPosEl.textContent=label;}"
+   "window.addEventListener('scroll',()=>{if(scrollTick) return; scrollTick=true; requestAnimationFrame(()=>{scrollTick=false; updateScrollPos(); updateActiveToc();});},{passive:true});"
+   "window.addEventListener('resize',()=>updateScrollPos());"
    "let navStack=[]; let navIndex=-1;"
    "let pinned=[]; let zoom=1;"
    "marked.setOptions({gfm:true,breaks:true});"
@@ -834,10 +946,12 @@ runtime script and style when it is safe for CSP nonce use."
    "function parseFrontmatter(md){if(!md.startsWith('---\\n')) return {front:null,body:md}; const end=md.indexOf('\\n---\\n',4); if(end===-1) return {front:null,body:md}; const raw=md.slice(4,end).trim(); const body=md.slice(end+5); const map={}; raw.split('\\n').forEach(line=>{const i=line.indexOf(':'); if(i>0){const k=line.slice(0,i).trim(); const v=line.slice(i+1).trim(); map[k]=v;}}); return {front:map,body};}"
    "function escapeHtml(s){return String(s==null?'':s).replace(/[&<>\"']/g,(ch)=>{if(ch==='&') return '&amp;'; if(ch==='<') return '&lt;'; if(ch==='>') return '&gt;'; if(ch==='\"') return '&quot;'; return '&#39;';});}"
    "function sanitizeUrlValue(value,allowMailto=false){const raw=String(value==null?'':value); const trimmed=raw.trim(); const folded=trimmed.replace(/[\\u0000-\\u001F\\u007F\\s]+/g,'').toLowerCase(); if(!folded||folded.startsWith('//')||trimmed.indexOf(String.fromCharCode(92))!==-1) return ''; if(/[\\u0000-\\u001F\\u007F\\s]/.test(trimmed)) return ''; if(/^[a-z][a-z0-9+.-]*:/.test(folded)&&!(/^https?:/.test(folded)||(allowMailto&&folded.startsWith('mailto:')))) return ''; return trimmed;}"
-  "function sanitizeHtml(html){const tpl=document.createElement('template'); tpl.innerHTML=html||''; tpl.content.querySelectorAll('script,iframe,object,embed,link,meta,base').forEach((el)=>el.remove()); const walker=document.createTreeWalker(tpl.content,NodeFilter.SHOW_ELEMENT); const nodes=[]; while(walker.nextNode()) nodes.push(walker.currentNode); nodes.forEach((el)=>{Array.from(el.attributes).forEach((attr)=>{const name=attr.name||''; const lower=name.toLowerCase(); if(/^on/i.test(name)||lower==='style'||lower==='srcset'||lower==='ping'){el.removeAttribute(attr.name); return;} if(/^(href|src|xlink:href|formaction|action|poster)$/i.test(name)){const allowMailto=/^(href|xlink:href)$/i.test(name); const safe=sanitizeUrlValue(attr.value||'',allowMailto); if(safe){el.setAttribute(attr.name,safe);}else{el.removeAttribute(attr.name);}}}); if(el.tagName&&el.tagName.toLowerCase()==='a'&&(el.getAttribute('target')||'').toLowerCase()==='_blank'){el.setAttribute('rel','noopener noreferrer');}}); return tpl.innerHTML;}"
-   "function setSanitizedSvg(container,svg){const tpl=document.createElement('template'); tpl.innerHTML=sanitizeHtml(svg||''); const root=tpl.content.firstElementChild; if(!root||root.tagName.toLowerCase()!=='svg'||tpl.content.childElementCount!==1) throw new Error('invalid mermaid svg'); container.replaceChildren(root.cloneNode(true));}"
+  "function sanitizeHtml(html,allowTrustedStyles=false){const tpl=document.createElement('template'); tpl.innerHTML=html||''; const removed=allowTrustedStyles?'script,iframe,object,embed,link,meta,base':'script,iframe,object,embed,link,meta,base,style'; tpl.content.querySelectorAll(removed).forEach((el)=>el.remove()); const walker=document.createTreeWalker(tpl.content,NodeFilter.SHOW_ELEMENT); const nodes=[]; while(walker.nextNode()) nodes.push(walker.currentNode); nodes.forEach((el)=>{Array.from(el.attributes).forEach((attr)=>{const name=attr.name||''; const lower=name.toLowerCase(); if(/^on/i.test(name)||(lower==='style'&&!allowTrustedStyles)||lower==='srcset'||lower==='ping'){el.removeAttribute(attr.name); return;} if(/^(href|src|xlink:href|formaction|action|poster)$/i.test(name)){const allowMailto=/^(href|xlink:href)$/i.test(name); const safe=sanitizeUrlValue(attr.value||'',allowMailto); if(safe){el.setAttribute(attr.name,safe);}else{el.removeAttribute(attr.name);}}}); if(el.tagName&&el.tagName.toLowerCase()==='a'&&(el.getAttribute('target')||'').toLowerCase()==='_blank'){el.setAttribute('rel','noopener noreferrer');}}); return tpl.innerHTML;}"
+   "function setSanitizedSvg(container,svg){const tpl=document.createElement('template'); tpl.innerHTML=sanitizeHtml(svg||'',true); const root=tpl.content.firstElementChild; if(!root||root.tagName.toLowerCase()!=='svg'||tpl.content.childElementCount!==1) throw new Error('invalid mermaid svg'); container.replaceChildren(root.cloneNode(true));}"
    "function renderFrontmatter(front){if(!front) return ''; const rows=Object.entries(front).map(([k,v])=>`<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`).join(''); return `<details class=\"frontmatter\" open><summary>Frontmatter</summary><table>${rows}</table></details>`;}"
-   "function buildToc(){tocEl.innerHTML=''; const hs=mdEl.querySelectorAll('h1,h2,h3,h4,h5,h6'); hs.forEach((h,i)=>{if(!h.id)h.id='h-'+i; const a=document.createElement('a'); a.href='#'+h.id; a.textContent=h.textContent; a.style.paddingLeft=((parseInt(h.tagName.slice(1))-1)*10+8)+'px'; tocEl.appendChild(a);});}"
+   "let tocLinks=new Map(); let tocHeadings=[];"
+   "function updateActiveToc(){if(!tocHeadings.length) return; const line=Math.min(120,window.innerHeight*0.25); let currentId=tocHeadings[0]; tocHeadings.forEach((id)=>{const h=document.getElementById(id); if(h&&h.getBoundingClientRect().top<=line) currentId=id;}); tocLinks.forEach((a)=>a.classList.remove('active')); const active=tocLinks.get(currentId); if(active) active.classList.add('active');}"
+   "function buildToc(){tocEl.innerHTML=''; const hs=mdEl.querySelectorAll('h1,h2,h3,h4,h5,h6'); const links=new Map(); hs.forEach((h,i)=>{if(!h.id)h.id='h-'+i; const a=document.createElement('a'); a.href='#'+h.id; a.textContent=h.textContent; a.style.paddingLeft=((parseInt(h.tagName.slice(1))-1)*10+8)+'px'; tocEl.appendChild(a); links.set(h.id,a);}); tocLinks=links; tocHeadings=Array.from(hs).map((h)=>h.id); updateActiveToc();}"
    "function highlightCodeBlocks(){mdEl.querySelectorAll('pre code').forEach((code)=>{try{hljs.highlightElement(code);}catch(e){}});}"
    "function wireCopy(){mdEl.querySelectorAll('pre').forEach((pre)=>{const old=pre.querySelector('.copy-btn'); if(old) old.remove(); const code=pre.querySelector('code'); const src=code||pre; const b=document.createElement('button'); b.className='copy-btn'; b.textContent='Copy'; b.onclick=async()=>{try{await navigator.clipboard.writeText(src.innerText); b.textContent='Copied'; setTimeout(()=>b.textContent='Copy',900);}catch(e){b.textContent='Failed'; setTimeout(()=>b.textContent='Copy',900);}}; pre.appendChild(b);});}"
    "async function renderMermaid(){"
@@ -848,7 +962,7 @@ runtime script and style when it is safe for CSP nonce use."
    "if(el.tagName==='PRE'){const clone=el.cloneNode(true); clone.querySelectorAll('.copy-btn').forEach((b)=>b.remove()); graph=clone.textContent||'';}"
    "else{graph=el.textContent||'';}"
    "if(!graph.trim()) continue;"
-   "const holder=document.createElement('div'); holder.style.background='#fff'; holder.style.padding='10px'; holder.style.borderRadius='10px'; holder.style.overflow='auto';"
+   "const holder=document.createElement('div'); holder.className='mermaid-holder';"
    "try{const out=await mermaid.render('m'+Math.random().toString(36).slice(2),graph); setSanitizedSvg(holder,out.svg);}"
    "catch(e){holder.className='render-error'; holder.textContent=graph;}"
    "if(pre&&pre.parentNode) pre.parentNode.replaceChild(holder,pre);"
@@ -856,8 +970,8 @@ runtime script and style when it is safe for CSP nonce use."
    "function renderMath(){"
    "if(!window.renderMathInElement) return;"
    "try{renderMathInElement(mdEl,{delimiters:["
-   "{left:'\\\\\\\\[',right:'\\\\\\\\]',display:true},"
-   "{left:'\\\\\\\\(',right:'\\\\\\\\)',display:false},"
+   "{left:'\\\\[',right:'\\\\]',display:true},"
+   "{left:'\\\\(',right:'\\\\)',display:false},"
    "{left:'$$',right:'$$',display:true},"
    "{left:'$',right:'$',display:false},"
    "{left:'\\\\begin{equation}',right:'\\\\end{equation}',display:true},"
@@ -876,7 +990,7 @@ runtime script and style when it is safe for CSP nonce use."
    "{left:'\\\\begin{pmatrix}',right:'\\\\end{pmatrix}',display:true},"
    "{left:'\\\\begin{bmatrix}',right:'\\\\end{bmatrix}',display:true},"
    "{left:'\\\\begin{vmatrix}',right:'\\\\end{vmatrix}',display:true}"
-   "],ignoredTags:['script','noscript','style','textarea','pre','code','.render-error'],"
+   "],ignoredTags:['script','noscript','style','textarea','pre','code'],ignoredClasses:['render-error'],"
    "throwOnError:false,errorColor:'#f85149'});"
    "}catch(e){console.warn('KaTeX render error:',e);}"
    "}"
@@ -894,7 +1008,7 @@ runtime script and style when it is safe for CSP nonce use."
    "function updateNavButtons(){document.getElementById('back').disabled=navIndex<=0; document.getElementById('forward').disabled=navIndex<0||navIndex>=navStack.length-1;}"
    "let es=null;"
    "async function fetchContent(){const r=await fetch('/content?id='+encodeURIComponent(currentId),{cache:'no-store'}); return r.json();}"
-   "async function applyContent(j){if(!j.ok){statusEl.textContent=j.error||'not found'; dotEl.className='dot dot-disconnected'; return;} statusEl.textContent='live • rev '+j.revision+' • '+(j.name||''); dotEl.className='dot'; if(j.revision===lastRev) return; lastRev=j.revision; const kind=j.contentKind||'markdown'; let html=''; if(kind==='org-html'){html=j.html||'';}else{const parsed=parseFrontmatter(j.markdown||''); html=renderFrontmatter(parsed.front)+marked.parse(parsed.body||'');} html=sanitizeHtml(html); mdEl.setAttribute('data-content-kind',kind); mdEl.innerHTML=html; wireCopy(); renderMath(); await renderMermaid(); buildToc(); mdEl.setAttribute('data-base-html',mdEl.innerHTML); applyHighlights(); applyZoom(); pushNav(currentId,j.name||''); history.replaceState({id:currentId},'',`?id=${encodeURIComponent(currentId)}`);}"
+   "async function applyContent(j){if(!j.ok){statusEl.textContent=j.error||'not found'; dotEl.className='dot dot-disconnected'; return;} statusEl.textContent='live • rev '+j.revision+' • '+(j.name||''); dotEl.className='dot'; if(j.revision===lastRev) return; lastRev=j.revision; const kind=j.contentKind||'markdown'; let html=''; if(kind==='org-html'){html=j.html||'';}else{const parsed=parseFrontmatter(j.markdown||''); html=renderFrontmatter(parsed.front)+marked.parse(parsed.body||'');} html=sanitizeHtml(html); mdEl.setAttribute('data-content-kind',kind); mdEl.innerHTML=html; wireCopy(); renderMath(); await renderMermaid(); buildToc(); mdEl.setAttribute('data-base-html',mdEl.innerHTML); applyHighlights(); applyZoom(); pushNav(currentId,j.name||''); history.replaceState({id:currentId},'',`?id=${encodeURIComponent(currentId)}`); updateScrollPos();}"
    "async function openLinkedDocument(href){try{const r=await fetch('/open?id='+encodeURIComponent(currentId)+'&path='+encodeURIComponent(href),{cache:'no-store'}); const j=await r.json(); if(!j.ok){statusEl.textContent=j.error||'open failed'; return;} currentId=j.buffer_id; lastRev=-1; connectSSE(); const c=await fetchContent(); await applyContent(c);}catch(e){statusEl.textContent='open failed';}}"
    "function wireDocumentLinkNavigation(){mdEl.querySelectorAll('a[href]').forEach(a=>{const href=a.getAttribute('href')||''; if(/^[a-zA-Z][a-zA-Z0-9+.-]*:/i.test(href)||href.startsWith('#')||href.startsWith('//')||href.indexOf(String.fromCharCode(92))!==-1) return; if(!/\\.(md|org|html)($|#|\\?)/i.test(href)) return; a.addEventListener('click',ev=>{ev.preventDefault(); openLinkedDocument(href);});});}"
    "function connectSSE(){if(!currentId){statusEl.textContent='missing id'; dotEl.className='dot dot-disconnected'; return;} if(es){es.close(); es=null;} es=new EventSource('/events?id='+encodeURIComponent(currentId)); es.addEventListener('open',()=>{statusEl.textContent='connected'; dotEl.className='dot';}); es.addEventListener('revision',async()=>{try{const j=await fetchContent(); await applyContent(j);}catch(e){statusEl.textContent='sync error';}}); es.onerror=()=>{statusEl.textContent='reconnecting…'; dotEl.className='dot dot-disconnected';};}"
@@ -1127,10 +1241,24 @@ Return :invalid when REQUEST contains malformed or folded headers."
    "Connection: keep-alive\r\n\r\n"
    "retry: 1200\n\n"))
 
+(defun doclive--acceptable-fetch-site-p (headers)
+  "Return non-nil when the Sec-Fetch-Site HEADERS value is acceptable.
+Browsers cannot be relied upon for SameSite isolation across loopback
+ports because port is not part of a site.  When a browser sends
+Sec-Fetch-Site, require `same-origin' or `none' so that requests
+initiated by another local origin (reported as `same-site' or
+`cross-site') are rejected.  Non-browser clients that omit the header
+are still allowed."
+  (let ((values (doclive--request-header-values headers "sec-fetch-site")))
+    (or (null values)
+        (and (= (length values) 1)
+             (member (downcase (car values)) '("same-origin" "none"))))))
+
 (defun doclive--authorized-request-p (path &optional headers)
   "Return non-nil if PATH is valid and HEADERS has the current token cookie."
   (and (doclive--valid-query-p path)
        (not (doclive--query-key-present-p path "bootstrap"))
+       (doclive--acceptable-fetch-site-p headers)
        (doclive--authorized-cookie-p headers)))
 
 (defun doclive--authorized-cookie-p (headers)
@@ -1230,10 +1358,15 @@ Return :invalid when REQUEST contains malformed or folded headers."
     (if (doclive--authorized-request-p path headers)
         (let* ((id (doclive--query-param path "id"))
                (entry (and id (doclive--get-entry id))))
-          (if (not entry)
-              (progn
-                (process-send-string proc (doclive--http-response "400 Bad Request" "text/plain" "Missing or unknown buffer id"))
-                (delete-process proc))
+          (cond
+           ((not entry)
+            (process-send-string proc (doclive--http-response "400 Bad Request" "text/plain" "Missing or unknown buffer id"))
+            (delete-process proc))
+           ((>= (length (doclive--sse-clients-for id))
+                doclive--max-sse-clients-per-buffer)
+            (process-send-string proc (doclive--http-response "429 Too Many Requests" "text/plain" "Too many preview streams"))
+            (delete-process proc))
+           (t
             (let ((clients (doclive--sse-clients-for id)))
               (process-send-string proc (doclive--sse-handshake))
               (set-process-query-on-exit-flag proc nil)
@@ -1242,7 +1375,7 @@ Return :invalid when REQUEST contains malformed or folded headers."
               (doclive--set-sse-clients-for id (cons proc clients))
               (process-send-string proc
                                    (format "event: revision\ndata: {\"revision\":%d}\n\n"
-                                           (or (plist-get entry :revision) 0))))))
+                                           (or (plist-get entry :revision) 0)))))))
       (doclive--send-forbidden proc)))
    (t
     (process-send-string proc (doclive--http-response "404 Not Found" "text/plain" "Not Found"))
@@ -1273,17 +1406,44 @@ Return :invalid when REQUEST contains malformed or folded headers."
            doclive--change-timers)
   (clrhash doclive--change-timers))
 
+(defun doclive--cancel-request-timeout (proc)
+  "Cancel the header-read timeout timer stored on PROC, if any."
+  (let ((timer (process-get proc 'doclive-request-timer)))
+    (when timer
+      (cancel-timer timer)
+      (process-put proc 'doclive-request-timer nil))))
+
+(defun doclive--arm-request-timeout (proc)
+  "Close PROC if it does not finish its HTTP headers in time."
+  (unless (process-get proc 'doclive-request-timer)
+    (process-put
+     proc 'doclive-request-timer
+     (run-with-timer
+      doclive--request-header-timeout-seconds nil
+      (lambda ()
+        (process-put proc 'doclive-request-timer nil)
+        (when (and (process-live-p proc)
+                   (not (process-get proc 'doclive-headers-complete)))
+          (ignore-errors
+            (process-send-string
+             proc (doclive--http-response "408 Request Timeout" "text/plain" "Request timeout")))
+          (ignore-errors (delete-process proc))))))))
+
 (defun doclive--connection-filter (proc chunk)
   "Handle incoming HTTP CHUNK on PROC."
+  (doclive--arm-request-timeout proc)
   (let* ((buffer (concat (or (process-get proc 'doclive-request-buffer) "") chunk)))
     (if (> (string-bytes buffer) doclive--max-request-bytes)
         (progn
           (process-put proc 'doclive-request-buffer nil)
+          (doclive--cancel-request-timeout proc)
           (process-send-string proc (doclive--http-response "413 Payload Too Large" "text/plain" "Request header too large"))
           (delete-process proc))
       (if (not (string-match-p "\r\n\r\n" buffer))
           (process-put proc 'doclive-request-buffer buffer)
         (process-put proc 'doclive-request-buffer nil)
+        (process-put proc 'doclive-headers-complete t)
+        (doclive--cancel-request-timeout proc)
         (let* ((head (substring buffer 0 (string-match "\r\n\r\n" buffer)))
                (line (car (split-string head "\r\n" t)))
                (path (doclive--parse-request-path line))
@@ -1349,14 +1509,20 @@ Return :invalid when REQUEST contains malformed or folded headers."
   (doclive--ensure-server-token)
   (unless (doclive-server-running-p)
     (setq doclive--server
-          (make-network-process
-           :name "doclive-server"
-           :server t
-           :service doclive-port
-           :host doclive-host
-           :filter #'doclive--connection-filter
-           :coding 'utf-8-unix
-           :noquery t))
+          (condition-case err
+              (make-network-process
+               :name "doclive-server"
+               :server t
+               :service doclive-port
+               :host doclive-host
+               :filter #'doclive--connection-filter
+               :coding 'utf-8-unix
+               :noquery t)
+            (file-error
+             (setq doclive--server-token nil)
+             (user-error "Doclive cannot listen on %s:%d (%s); customize `doclive-port' and retry"
+                         doclive-host doclive-port
+                         (error-message-string err)))))
     (add-hook 'kill-emacs-hook #'doclive--kill-emacs-cleanup)
     (message "doclive server started: http://%s:%d"
              (doclive--url-host doclive-host)
@@ -1378,6 +1544,7 @@ Return :invalid when REQUEST contains malformed or folded headers."
            doclive--sse-clients)
   (clrhash doclive--sse-clients)
   (doclive--cancel-all-change-timers)
+  (clrhash doclive--buffers)
   (remove-hook 'kill-emacs-hook #'doclive--kill-emacs-cleanup)
   (message "doclive server stopped"))
 

@@ -89,6 +89,7 @@
   "Release-facing docs should describe the current preview security model."
   (let ((security (doclive-test--file-string "SECURITY.md"))
         (readme (doclive-test--file-string "README.org"))
+        (readme-ja (doclive-test--file-string "README.ja.org"))
         (melpa-notes (doclive-test--file-string "docs/MELPA_SUBMISSION.org"))
         (news (doclive-test--file-string "NEWS.org")))
     (should (string-match-p (regexp-quote "short-lived, single-use bootstrap code") security))
@@ -102,18 +103,24 @@
     (should (string-match-p (regexp-quote "checked after symlink resolution") security))
     (should (string-match-p (regexp-quote "symlink inside the source directory") security))
     (should-not (string-match-p (regexp-quote "Treat preview URLs as bearer secrets") security))
-    (should (string-match-p (regexp-quote "short-lived single-use bootstrap code") readme))
+    (should (string-match-p (regexp-quote "short-lived, single-use bootstrap") readme))
     (should (string-match-p (regexp-quote "token-free preview URL") readme))
-    (should (string-match-p (regexp-quote "Secure= 属性を付けません") readme))
+    (should (string-match-p (regexp-quote "intentionally omits =Secure=") readme))
     (should (string-match-p (regexp-quote "transport protection") readme))
-    (should (string-match-p (regexp-quote "有効な Cookie があっても拒否します") readme))
-    (should (string-match-p (regexp-quote "opaque random routing identifier") readme))
-    (should (string-match-p (regexp-quote "ローカルファイルパスや buffer 名から生成しません") readme))
-    (should (string-match-p (regexp-quote "シンボリックリンク解決後の実パス") readme))
-    (should-not (string-match-p (regexp-quote "プレビューURLにはセッションごとの =token= が含まれ") readme))
-    (should-not (string-match-p (regexp-quote "初回読み込み後、preview runtime はブラウザの表示URLと履歴から =token= query parameter を削除します") readme))
-    (should-not (string-match-p (regexp-quote "このURLは bearer secret") readme))
-    (should-not (string-match-p (regexp-quote "token を含むURL") readme))
+    (should (string-match-p (regexp-quote "rejected even with a valid cookie") readme))
+    (should (string-match-p (regexp-quote "opaque per-buffer random routing identifiers") readme))
+    (should (string-match-p (regexp-quote "never derived from file paths or buffer names") readme))
+    (should (string-match-p (regexp-quote "checked after symlink resolution") readme))
+    (should (string-match-p (regexp-quote "short-lived single-use bootstrap code") readme-ja))
+    (should (string-match-p (regexp-quote "token-free preview URL") readme-ja))
+    (should (string-match-p (regexp-quote "Secure= 属性を付けません") readme-ja))
+    (should (string-match-p (regexp-quote "transport protection") readme-ja))
+    (should (string-match-p (regexp-quote "有効な Cookie があっても拒否します") readme-ja))
+    (should (string-match-p (regexp-quote "opaque random routing identifier") readme-ja))
+    (should (string-match-p (regexp-quote "ローカルファイルパスや buffer 名から生成しません") readme-ja))
+    (should (string-match-p (regexp-quote "シンボリックリンク解決後の実パス") readme-ja))
+    (should-not (string-match-p (regexp-quote "このURLは bearer secret") readme-ja))
+    (should-not (string-match-p (regexp-quote "token を含むURL") readme-ja))
     (should (string-match-p (regexp-quote "short-lived single-use bootstrap code") melpa-notes))
     (should (string-match-p (regexp-quote "token-free preview URL") melpa-notes))
     (should (string-match-p (regexp-quote "opaque") melpa-notes))
@@ -264,6 +271,58 @@
                   (kill-buffer buf))))))
       (when (file-exists-p side-effect)
         (delete-file side-effect)))))
+
+(ert-deftest doclive-test-org-export-rejects-eval-macro ()
+  "Org export should refuse eval macros instead of executing Emacs Lisp."
+  (defvar doclive-test--org-eval-marker)
+  (setq doclive-test--org-eval-marker nil)
+  (let ((html (doclive--org-to-html
+               "#+MACRO: p (eval (setq doclive-test--org-eval-marker \"executed\"))\n\n{{{p}}}\n")))
+    (should-not doclive-test--org-eval-marker)
+    (should (string-match-p "doclive-export-error" html))
+    (should (string-match-p "refused" html))))
+
+(ert-deftest doclive-test-org-export-rejects-include-directive ()
+  "Org export should refuse INCLUDE directives that read local files."
+  (let ((secret (make-temp-file "doclive-secret-")))
+    (unwind-protect
+        (progn
+          (with-temp-file secret (insert "TOP-SECRET-CONTENT"))
+          (let ((html (doclive--org-to-html
+                       (format "#+INCLUDE: %S export html\n" secret))))
+            (should-not (string-match-p "TOP-SECRET-CONTENT" html))
+            (should (string-match-p "refused" html))))
+      (when (file-exists-p secret)
+        (delete-file secret)))))
+
+(ert-deftest doclive-test-org-export-rejects-setupfile-directive ()
+  "Org export should refuse SETUPFILE directives that read local files."
+  (let ((html (doclive--org-to-html "#+SETUPFILE: /etc/passwd\n\n* Heading\n")))
+    (should (string-match-p "refused" html))))
+
+(ert-deftest doclive-test-org-export-allows-benign-macros ()
+  "Non-eval Org macros should still export normally."
+  (let ((html (doclive--org-to-html
+               "#+MACRO: hello *hi $1*\n\n{{{hello(world)}}}\n")))
+    (should-not (string-match-p "refused" html))
+    (should (string-match-p "hi" html))))
+
+(ert-deftest doclive-test-org-export-snapshot-blocks-eval-macro ()
+  "A previewed Org buffer with an eval macro should not execute it."
+  (defvar doclive-test--org-snap-marker)
+  (setq doclive-test--org-snap-marker nil)
+  (doclive-test--with-temp-org-file
+   "#+MACRO: p (eval (setq doclive-test--org-snap-marker \"executed\"))\n\n{{{p}}}\n"
+   (lambda (f)
+     (let ((buf (find-file-noselect f)))
+       (unwind-protect
+           (let* ((entry (doclive--snapshot-buffer buf))
+                  (obj (doclive-test--json-plist
+                        (doclive--json-for-id (plist-get entry :id)))))
+             (should-not doclive-test--org-snap-marker)
+             (should (string-match-p "refused" (plist-get obj :html))))
+         (when (buffer-live-p buf)
+           (kill-buffer buf)))))))
 
 (ert-deftest doclive-test-org-export-allows-unsafe-html-fixture ()
   "Org export can emit raw HTML that the browser runtime must sanitize."
@@ -593,9 +652,36 @@
   (let ((html (doclive--preview-html)))
     (should (string-match-p "mermaid" html))
     (should (string-match-p "katex" (downcase html)))
-    (should (string-match-p "highlight.js" html))
+    (should (string-match-p
+             (regexp-quote "@highlightjs/cdn-assets@11.11.1/highlight.min.js")
+             html))
     (should (string-match-p "marked" html))
     (should (string-match-p "EventSource" html))))
+
+(ert-deftest doclive-test-preview-html-pins-default-assets-with-sri ()
+  "Default CDN assets should carry Subresource Integrity attributes."
+  (let ((html (doclive--preview-html)))
+    (should (string-match-p
+             (regexp-quote "integrity='sha384-RH2xi4eIQ/gjtbs9fUXM68sLSi99C7ZWBRX1vDrVv6GQXRibxXLbwO2NGZB74MbU'")
+             html))
+    (should (string-match-p (regexp-quote "crossorigin='anonymous'") html))
+    ;; Every pinned default hash should appear exactly once.
+    (dolist (entry doclive--preview-asset-integrity)
+      (should (string-match-p (regexp-quote (cdr entry)) html)))))
+
+(ert-deftest doclive-test-preview-html-omits-sri-for-custom-mirrors ()
+  "Custom mirror URLs should load without a mismatched integrity attribute."
+  (let ((doclive-preview-asset-urls
+         '((highlight-css . "https://mirror.example.invalid/highlight.css")
+           (katex-css . "https://mirror.example.invalid/katex.css")
+           (marked-script . "https://mirror.example.invalid/marked.js")
+           (highlight-script . "https://mirror.example.invalid/highlight.js")
+           (katex-script . "https://mirror.example.invalid/katex.js")
+           (katex-auto-render-script . "https://mirror.example.invalid/auto-render.js")
+           (mermaid-script . "https://mirror.example.invalid/mermaid.js"))))
+    (let ((html (doclive--preview-html)))
+      (should (string-match-p "mirror.example.invalid" html))
+      (should-not (string-match-p "integrity=" html)))))
 
 (ert-deftest doclive-test-preview-html-honors-asset-overrides ()
   "Preview HTML should use overridden asset URLs from customization."
@@ -734,14 +820,14 @@
   (let ((html (doclive--preview-html)))
     (should (string-match-p "function sanitizeHtml" html))
     (should (string-match-p "function escapeHtml" html))
-    (should (string-match-p (regexp-quote "querySelectorAll('script,iframe,object,embed,link,meta,base')") html))
+    (should (string-match-p (regexp-quote "'script,iframe,object,embed,link,meta,base,style'") html))
     (should (string-match-p (regexp-quote "/^on/i") html))
     (should (string-match-p (regexp-quote "/^[a-z][a-z0-9+.-]*:/") html))
     (should (string-match-p
              (regexp-quote "allowMailto&&folded.startsWith('mailto:')")
              html))
     (should (string-match-p "xlink:href" html))
-    (should (string-match-p (regexp-quote "lower==='style'") html))
+    (should (string-match-p (regexp-quote "lower==='style'&&!allowTrustedStyles") html))
     (should (string-match-p (regexp-quote "lower==='srcset'") html))
     (should (string-match-p (regexp-quote "el.setAttribute('rel','noopener noreferrer')") html))
     (should (string-match-p (regexp-quote "return '&#39;'") html))
@@ -780,16 +866,18 @@
     (should-not (string-match-p (regexp-quote "/^(https?:|mailto:)/") html))))
 
 (ert-deftest doclive-test-preview-html-includes-csp-nonce ()
-  "Preview HTML should nonce inline runtime assets."
+  "Preview HTML should nonce the inline runtime script."
   (let* ((doclive--server-token "abc123_-")
          (html (doclive--preview-html "nonce123_-")))
-    (should (string-match-p (regexp-quote "<style nonce='nonce123_-'>") html))
+    (should (string-match-p (regexp-quote "<style>") html))
     (should (string-match-p (regexp-quote "<script nonce='nonce123_-'>") html))
     (should-not (string-match-p (regexp-quote "<script nonce='abc123_-'>") html))
     (should-not (string-match-p (regexp-quote "<script>") html))))
 
 (ert-deftest doclive-test-browser-content-security-policy-is-locked-down ()
-  "Preview CSP should deny ambient capabilities and allow only nonce-tagged inline assets."
+  "Preview CSP should deny ambient capabilities and nonce inline scripts.
+Inline styles are allowed for KaTeX and Mermaid runtime rendering, but
+never inline scripts."
   (let ((policy (doclive--browser-content-security-policy "nonce123_-")))
     (should (string-match-p (regexp-quote "default-src 'none'") policy))
     (should (string-match-p (regexp-quote "base-uri 'none'") policy))
@@ -797,8 +885,10 @@
     (should (string-match-p (regexp-quote "frame-ancestors 'none'") policy))
     (should (string-match-p (regexp-quote "object-src 'none'") policy))
     (should (string-match-p (regexp-quote "connect-src 'self'") policy))
-    (should (string-match-p (regexp-quote "'nonce-nonce123_-'") policy))
-    (should-not (string-match-p (regexp-quote "unsafe-inline") policy))))
+    (should (string-match-p "script-src [^;]*'nonce-nonce123_-'" policy))
+    (should (string-match-p "style-src [^;]*'unsafe-inline'" policy))
+    (should-not (string-match-p "script-src [^;]*'unsafe-inline'" policy))
+    (should-not (string-match-p "style-src [^;]*'nonce-" policy))))
 
 (ert-deftest doclive-test-session-cookie-header-is-http-only ()
   "Session cookie header should use only a validated token value."
@@ -862,7 +952,7 @@
     (should (string-match-p "function setSanitizedSvg" html))
     (should
      (string-match-p
-      (regexp-quote "tpl.innerHTML=sanitizeHtml(svg||'');")
+      (regexp-quote "tpl.innerHTML=sanitizeHtml(svg||'',true);")
       html))
     (should
      (string-match-p
@@ -1077,9 +1167,11 @@
   (should-not (doclive--valid-query-p "/content?%0d=value")))
 
 (ert-deftest doclive-test-random-token-uses-openssl-rand ()
-  "Token generation should prefer OS-backed random bytes when available."
+  "Token generation should fall back to openssl when urandom is unavailable."
   (let ((called nil))
-    (cl-letf (((symbol-function 'executable-find)
+    (cl-letf (((symbol-function 'file-readable-p)
+               (lambda (file) (not (equal file "/dev/urandom"))))
+              ((symbol-function 'executable-find)
                (lambda (program) (and (equal program "openssl") "/bin/openssl")))
               ((symbol-function 'process-file)
                (lambda (program infile destination display &rest args)
@@ -1113,6 +1205,23 @@
       (should
        (equal (doclive--random-token)
               "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")))))
+
+(ert-deftest doclive-test-random-token-prefers-urandom-over-openssl ()
+  "Token generation should not spawn a subprocess when urandom works."
+  (let ((bytes (apply #'unibyte-string (number-sequence 0 31)))
+        (subprocess-used nil))
+    (cl-letf (((symbol-function 'file-readable-p)
+               (lambda (file) (equal file "/dev/urandom")))
+              ((symbol-function 'insert-file-contents-literally)
+               (lambda (_file &optional _visit _beg _end _replace)
+                 (insert bytes)
+                 (list "/dev/urandom" (length bytes))))
+              ((symbol-function 'process-file)
+               (lambda (&rest _) (setq subprocess-used t) 0)))
+      (should
+       (equal (doclive--random-token)
+              "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"))
+      (should-not subprocess-used))))
 
 (ert-deftest doclive-test-random-token-falls-back-when-openssl-errors ()
   "Token generation should fail closed when all secure sources fail."
@@ -1225,6 +1334,21 @@
         (doclive-port 70000)
         (doclive--server nil))
     (should-error (doclive-start-server) :type 'user-error)))
+
+(ert-deftest doclive-test-start-server-reports-busy-port-as-user-error ()
+  "A bind failure should surface as an actionable user error."
+  (let ((doclive-host "127.0.0.1")
+        (doclive-port 39123)
+        (doclive--server nil)
+        (doclive--server-token "token"))
+    (cl-letf (((symbol-function 'make-network-process)
+               (lambda (&rest _)
+                 (signal 'file-error '("make server process failed"
+                                       "Address already in use")))))
+      (let ((err (should-error (doclive-start-server) :type 'user-error)))
+        (should (string-match-p "39123" (cadr err)))
+        (should (string-match-p "doclive-port" (cadr err)))))
+    (should-not doclive--server)))
 
 (ert-deftest doclive-test-server-host-validation-allows-ipv6-loopback ()
   "Server option validation should allow IPv6 loopback host syntax."
@@ -1355,11 +1479,11 @@
                "script-src .*'self'.*http://127\\.0\\.0\\.1:8000.*https://diagrams\\.example\\.invalid.*'nonce-nonce123_-'"
                response))
       (should (string-match-p
-               "style-src .*'self'.*https://assets\\.example\\.invalid.*'nonce-nonce123_-'"
+               "style-src [^;]*'self'[^;]*https://assets\\.example\\.invalid[^;]*'unsafe-inline'"
                response))
       (should-not (string-match-p (regexp-quote "'nonce-abc123_-'") response))
-      (should-not (string-match-p "script-src .*'unsafe-inline'" response))
-      (should-not (string-match-p "style-src .*'unsafe-inline'" response))
+      (should-not (string-match-p "script-src [^;]*'unsafe-inline'" response))
+      (should-not (string-match-p "style-src [^;]*'nonce-" response))
       (should (string-match-p "connect-src 'self'\r\n" response)))))
 
 (ert-deftest doclive-test-http-response-csp-rejects-malformed-asset-origins ()
@@ -2388,5 +2512,248 @@
           (should (string-match-p "Request header too large" (mapconcat #'identity sent ""))))
       (when (process-live-p proc)
         (delete-process proc)))))
+
+(ert-deftest doclive-test-connection-filter-accepts-request-at-exact-limit ()
+  "A request header block exactly at the byte limit should still route."
+  (let* ((request "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+         (doclive--max-request-bytes (string-bytes request))
+         (routed nil)
+         (proc (make-process :name "doclive-test-exact-limit"
+                             :buffer nil
+                             :command '("cat")
+                             :noquery t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'doclive--route-request)
+                   (lambda (_proc path &optional _headers)
+                     (setq routed path)))
+                  ((symbol-function 'process-send-string) #'ignore)
+                  ((symbol-function 'delete-process) #'ignore))
+          (doclive--connection-filter proc request)
+          (should (equal routed "/")))
+      (when (process-live-p proc)
+        (delete-process proc)))))
+
+(ert-deftest doclive-test-connection-filter-arms-and-cancels-timeout ()
+  "The header timeout should arm on first byte and cancel when headers finish."
+  (let ((armed nil)
+        (cancelled nil)
+        (proc (make-process :name "doclive-test-timeout"
+                            :buffer nil
+                            :command '("cat")
+                            :noquery t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'run-with-timer)
+                   (lambda (&rest _) (setq armed t) :fake-timer))
+                  ((symbol-function 'cancel-timer)
+                   (lambda (timer) (setq cancelled timer)))
+                  ((symbol-function 'process-send-string) #'ignore)
+                  ((symbol-function 'delete-process) #'ignore)
+                  ((symbol-function 'doclive--route-request) #'ignore))
+          ;; Partial header: timer armed, not cancelled.
+          (doclive--connection-filter proc "GET / HTTP/1.1\r\nHost: 127.0.0.1")
+          (should armed)
+          (should-not cancelled)
+          ;; Completing headers cancels the timer.
+          (doclive--connection-filter proc "\r\n\r\n")
+          (should (eq cancelled :fake-timer))
+          (should (process-get proc 'doclive-headers-complete)))
+      (when (process-live-p proc)
+        (delete-process proc)))))
+
+;; Rendering data path
+
+(ert-deftest doclive-test-snapshot-json-preserves-multibyte-and-injection ()
+  "Snapshot JSON should round-trip multibyte text and hostile characters."
+  (let ((content "# 日本語🙂\n\n</script>\"quotes\" and \\backslash\\ and é\n"))
+    (with-temp-buffer
+      (insert content)
+      (let* ((entry (doclive--snapshot-buffer (current-buffer)))
+             (raw (doclive--json-for-id (plist-get entry :id)))
+             (obj (doclive-test--json-plist raw)))
+        (should (equal (plist-get obj :markdown) content))))))
+
+(ert-deftest doclive-test-snapshot-revision-is-monotonic ()
+  "Each snapshot should increment the revision exposed to clients."
+  (with-temp-buffer
+    (insert "# Rev\n")
+    (let* ((first (doclive--snapshot-buffer (current-buffer)))
+           (id (plist-get first :id)))
+      (should (equal (plist-get first :revision) 1))
+      (doclive--snapshot-buffer (current-buffer))
+      (let ((obj (doclive-test--json-plist (doclive--json-for-id id))))
+        (should (equal (plist-get obj :revision) 2))))))
+
+(ert-deftest doclive-test-org-to-html-error-fallback-is-escaped ()
+  "Org export failures should render as an escaped error block."
+  (cl-letf (((symbol-function 'org-export-string-as)
+             (lambda (&rest _)
+               (error "export exploded <script>alert(1)</script>"))))
+    (let ((html (doclive--org-to-html "* Heading\n")))
+      (should (string-match-p "doclive-export-error" html))
+      (should (string-match-p "&lt;script&gt;" html))
+      (should-not (string-match-p "<script>" html)))))
+
+;; Lifecycle cleanup
+
+(ert-deftest doclive-test-kill-emacs-cleanup-releases-all-state ()
+  "The kill-emacs hook should drop server, clients, timers, and entries."
+  (let ((doclive--server nil)
+        (doclive--server-token "token")
+        (doclive--buffers (make-hash-table :test #'equal))
+        (doclive--sse-clients (make-hash-table :test #'equal))
+        (doclive--change-timers (make-hash-table :test #'equal))
+        (cancelled nil))
+    (puthash "id" (list :id "id") doclive--buffers)
+    (puthash "id" (list :fake-client) doclive--sse-clients)
+    (puthash "id" :fake-timer doclive--change-timers)
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_) nil))
+              ((symbol-function 'cancel-timer)
+               (lambda (timer) (push timer cancelled))))
+      (doclive--kill-emacs-cleanup))
+    (should-not doclive--server-token)
+    (should (zerop (hash-table-count doclive--buffers)))
+    (should (zerop (hash-table-count doclive--sse-clients)))
+    (should (zerop (hash-table-count doclive--change-timers)))
+    (should (equal cancelled '(:fake-timer)))))
+
+(ert-deftest doclive-test-on-kill-releases-buffer-tracking ()
+  "Killing a previewed buffer should drop its entry and SSE clients."
+  ;; Not `with-temp-buffer': its buffer inhibits `kill-buffer-hook'.
+  (let ((buf (generate-new-buffer "doclive-test-kill")))
+    (unwind-protect
+        (with-current-buffer buf
+          (insert "# Kill\n")
+          (doclive-preview-mode 1)
+          (let ((id (doclive--buffer-id buf)))
+            (should (doclive--get-entry id))
+            (kill-buffer buf)
+            (should-not (doclive--get-entry id))
+            (should-not (gethash id doclive--sse-clients))
+            (should-not (gethash id doclive--change-timers))))
+      (when (buffer-live-p buf)
+        (kill-buffer buf)))))
+
+(ert-deftest doclive-test-stop-server-clears-buffer-entries ()
+  "Stopping the server should release tracked buffer entries."
+  (let ((doclive--server nil)
+        (doclive--server-token "token")
+        (doclive--buffers (make-hash-table :test #'equal)))
+    (puthash "id" (list :id "id") doclive--buffers)
+    (doclive-stop-server)
+    (should (zerop (hash-table-count doclive--buffers)))))
+
+;; Linked-document live preview
+
+(ert-deftest doclive-test-open-linked-document-enables-preview-mode ()
+  "Linked documents should join the live preview like the primary buffer."
+  (doclive-test--with-temp-linked-files
+   '(("a.md" . "# A\n\n[go](b.md)\n")
+     ("b.md" . "# B\n"))
+   (lambda (dir)
+     (let ((buf (find-file-noselect (expand-file-name "a.md" dir)))
+           (target nil))
+       (unwind-protect
+           (progn
+             (doclive--snapshot-buffer buf)
+             (doclive--open-linked-document (doclive--buffer-id buf) "b.md")
+             (setq target (find-buffer-visiting (expand-file-name "b.md" dir)))
+             (should target)
+             (should (buffer-local-value 'doclive-preview-mode target)))
+         (dolist (b (list buf target))
+           (when (buffer-live-p b)
+             (kill-buffer b))))))))
+
+;; Cross-origin isolation
+
+(ert-deftest doclive-test-authorized-request-rejects-cross-site-fetch ()
+  "Cookie-authorized routes should reject browser cross-port requests."
+  (let* ((doclive--server-token "token")
+         (cookie '("cookie" . "doclive-token=token")))
+    ;; Non-browser clients omit Sec-Fetch-Site and stay authorized.
+    (should (doclive--authorized-request-p "/content?id=a" (list cookie)))
+    ;; Same-origin browser fetches (from the preview page) stay authorized.
+    (should (doclive--authorized-request-p
+             "/content?id=a"
+             (list cookie '("sec-fetch-site" . "same-origin"))))
+    (should (doclive--authorized-request-p
+             "/content?id=a"
+             (list cookie '("sec-fetch-site" . "none"))))
+    ;; A hostile local origin on another port is reported as same-site.
+    (should-not (doclive--authorized-request-p
+                 "/content?id=a"
+                 (list cookie '("sec-fetch-site" . "same-site"))))
+    (should-not (doclive--authorized-request-p
+                 "/content?id=a"
+                 (list cookie '("sec-fetch-site" . "cross-site"))))))
+
+;; Query decoding
+
+(ert-deftest doclive-test-query-param-decodes-utf-8-values ()
+  "Percent-encoded query values should decode as UTF-8 text."
+  (should (equal (doclive--query-param "/open?id=a&path=caf%C3%A9.md" "path")
+                 "café.md"))
+  (should (equal (doclive--query-param "/open?id=a&path=%E6%97%A5%E6%9C%AC%E8%AA%9E.org" "path")
+                 "日本語.org")))
+
+;; SSE success path
+
+(ert-deftest doclive-test-events-route-registers-client-and-sends-revision ()
+  "The /events route should hand-shake, register the client, and push state."
+  (let ((doclive--server-token "token")
+        (doclive--buffers (make-hash-table :test #'equal))
+        (doclive--sse-clients (make-hash-table :test #'equal))
+        (sent nil)
+        (sentinel nil)
+        (deleted nil))
+    (puthash "id1" (list :id "id1" :revision 7) doclive--buffers)
+    (cl-letf (((symbol-function 'process-send-string)
+               (lambda (_proc string) (push string sent)))
+              ((symbol-function 'set-process-sentinel)
+               (lambda (_proc fn) (setq sentinel fn)))
+              ((symbol-function 'set-process-query-on-exit-flag) #'ignore)
+              ((symbol-function 'process-put) #'ignore)
+              ((symbol-function 'process-live-p) (lambda (_) t))
+              ((symbol-function 'delete-process)
+               (lambda (_proc) (setq deleted t))))
+      (doclive--route-request :fake-proc "/events?id=id1"
+                              '(("cookie" . "doclive-token=token"))))
+    (let ((payload (mapconcat #'identity (nreverse sent) "")))
+      (should (string-match-p "text/event-stream" payload))
+      (should (string-match-p "event: revision" payload))
+      (should (string-match-p "{\"revision\":7}" payload)))
+    (should (functionp sentinel))
+    (should-not deleted)
+    (should (member :fake-proc (gethash "id1" doclive--sse-clients)))))
+
+;; Parser robustness
+
+(ert-deftest doclive-test-http-parser-never-signals-on-hostile-input ()
+  "Request parsing helpers should reject hostile input without signaling."
+  (dolist (input '(""
+                   "\r\n\r\n"
+                   "GET"
+                   "GET  HTTP/1.1"
+                   "GET / HTTP/9.9"
+                   "GET /%zz HTTP/1.1"
+                   "GET /?%00=%00 HTTP/1.1"
+                   "POST / HTTP/1.1"
+                   "GET /../../etc/passwd HTTP/1.1"
+                   "GET \x00\x01\x02 HTTP/1.1"
+                   "GET /?a=%c3 HTTP/1.1"
+                   "GET /?a==&a=&&& HTTP/1.1"
+                   "\xff\xfe\xfd"
+                   "GET /?id=%F0%9F%99%82 HTTP/1.1"))
+    (let ((path (doclive--parse-request-path input)))
+      (should-not (eq 'signaled
+                      (condition-case nil
+                          (progn
+                            (doclive--valid-request-line-p input)
+                            (doclive--parse-request-headers (concat input "\r\nX: y"))
+                            (when path
+                              (doclive--valid-query-p path)
+                              (doclive--query-param path "id")
+                              (doclive--query-key-present-p path "token"))
+                            nil)
+                        (error 'signaled)))))))
 
 ;;; doclive-test.el ends here

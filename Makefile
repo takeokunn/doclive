@@ -6,7 +6,7 @@ SRC = doclive.el
 TEST = test/doclive-test-helpers.el test/doclive-test.el
 AUTOLOAD_SYMBOLS = doclive-start-server doclive-stop-server doclive-preview-mode doclive-preview-buffer doclive-preview-file doclive-reload-page
 
-.PHONY: check compile test lint package-lint autoloads security smoke clean
+.PHONY: check compile test lint package-lint autoloads security smoke check-assets clean
 
 check: compile test lint package-lint autoloads security smoke
 	git diff --check
@@ -56,6 +56,19 @@ security:
 
 smoke:
 	$(ZSH) ./scripts/daemon-smoke.sh
+
+check-assets:
+	@$(EMACS_BATCH) -l doclive.el --eval \
+	  '(dolist (pair doclive-preview-asset-urls) (princ (format "%s\n" (cdr pair))))' \
+	  | while read -r url; do \
+	      printf 'checking %s ... ' "$$url"; \
+	      if curl -fsSL --retry 2 --max-time 30 -o /dev/null "$$url"; then \
+	        echo ok; \
+	      else \
+	        echo "FAILED"; \
+	        exit 1; \
+	      fi; \
+	    done
 
 clean:
 	rm -f *.elc test/*.elc doclive-autoloads.el

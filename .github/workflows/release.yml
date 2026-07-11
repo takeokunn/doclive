@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - name: Verify package version matches tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          header=$(perl -ne 'print $1 if /^;; Version: (.*)$/' doclive.el)
+          if [ "$header" != "$version" ]; then
+            echo "doclive.el Version header ($header) does not match tag ($version)" >&2
+            exit 1
+          fi
+          if ! grep -q "^\* $version " NEWS.org; then
+            echo "NEWS.org has no section for $version" >&2
+            exit 1
+          fi
+
+      - name: Run release gate
+        run: nix develop --command make check
+
+  publish:
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+
+      - name: Extract release notes from NEWS.org
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          perl -e 'my $version = shift; my $collect = 0; while (<>) { if (/^\* \Q$version\E /) { $collect = 1; next } if ($collect && /^\* /) { last } print if $collect }' "$version" NEWS.org > release-notes.org
+          if ! grep -q '[^[:space:]]' release-notes.org; then
+            echo "extracted release notes are empty" >&2
+            exit 1
+          fi
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "doclive $TAG" \
+            --notes-file release-notes.org \
+            --verify-tag
