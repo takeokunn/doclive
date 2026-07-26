@@ -31,9 +31,10 @@
               pkgs.gitleaks
               pkgs.gnumake
               pkgs.pre-commit
+              pkgs.nodejs
               pkgs.zsh
               pkgs.zizmor
-            ];
+            ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.chromium ];
 
             shellHook = ''
               make autoloads 2>/dev/null
@@ -49,6 +50,7 @@
               echo "  make package-lint       Run package-lint"
               echo "  make security           Run secret and GitHub Actions security checks"
               echo "  make smoke              Run daemon HTTP smoke test"
+              echo "  make browser-smoke      Run headless Chromium preview smoke test"
               echo "  pre-commit run --all-files"
               echo "  nix run .#compile       Byte-compile (standalone)"
               echo "  nix run .#test          Run tests (standalone)"
@@ -118,6 +120,18 @@
             );
             meta.description = "Run daemon HTTP smoke test";
           };
+          mkBrowserSmokeApp = {
+            type = "app";
+            program = toString (
+              pkgs.writeShellScript "doclive-browser-smoke" ''
+                export EMACS=${pkgs.lib.getExe emacs}
+                export PATH=${pkgs.lib.makeBinPath [ pkgs.nodejs ]}:$PATH
+                ${pkgs.lib.optionalString pkgs.stdenv.isLinux "export CHROMIUM_BIN=${pkgs.lib.getExe pkgs.chromium}"}
+                ${make} browser-smoke
+              ''
+            );
+            meta.description = "Run headless Chromium preview smoke test";
+          };
         in
         {
           compile = mkApp emacs "compile" "Byte-compile doclive with warnings as errors";
@@ -130,6 +144,7 @@
             pkgs.zizmor
           ] "Run secret scanning and GitHub Actions security checks";
           smoke = mkSmokeApp;
+          browser-smoke = mkBrowserSmokeApp;
         }
       );
 
@@ -224,6 +239,26 @@
             env.ZSH = pkgs.lib.getExe pkgs.zsh;
             buildPhase = ''
               make smoke
+            '';
+            installPhase = ''
+              touch $out
+            '';
+          };
+
+        } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+          browser-smoke = pkgs.stdenvNoCC.mkDerivation {
+            name = "doclive-browser-smoke";
+            inherit src;
+            nativeBuildInputs = [
+              emacs
+              pkgs.chromium
+              pkgs.nodejs
+            ];
+            env.CHROMIUM_BIN = pkgs.lib.getExe pkgs.chromium;
+            env.EMACS = pkgs.lib.getExe emacs;
+            buildPhase = ''
+              export HOME=$TMPDIR
+              make browser-smoke
             '';
             installPhase = ''
               touch $out

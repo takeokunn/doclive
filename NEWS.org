@@ -1,5 +1,20 @@
 #+TITLE: doclive NEWS - user-visible changes
 
+* 1.2.0 (2026-07-26)
+
+  - Unchanged Org buffers reuse their exported preview content, avoiding
+    repeated full-buffer copies and Org HTML exports while preserving live
+    revision broadcasts.
+  - Opening a linked document no longer performs two snapshots before its
+    first preview.
+  - Release checks now validate the embedded preview JavaScript, exercise
+    search, pin, theme, zoom, and status behavior in a real browser, and verify
+    packaged release assets.
+  - Preview status updates are announced to assistive technology, decorative
+    status indicators are hidden from it, and pinned-highlight removal controls
+    have descriptive labels.
+  - Continuous integration now tests the supported Emacs 30.2 release.
+
 * 1.1.0 (2026-07-11)
 
   Initial release.

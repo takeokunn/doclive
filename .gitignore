@@ -1,3 +1,5 @@
 *.elc
 doclive-autoloads.el
 .playwright-mcp/
+
+.worktrees/

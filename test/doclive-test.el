@@ -630,6 +630,14 @@
     (should (string-match-p (regexp-quote "class='hero'") html))
     (should (string-match-p (regexp-quote "doclive workspace") html))
     (should (string-match-p (regexp-quote "role='toolbar'") html))
+    (should (string-match-p
+             (regexp-quote "role='status' aria-live='polite' aria-atomic='true'")
+             html))
+    (should (string-match-p (regexp-quote "id='dot' aria-hidden='true'") html))
+    (should (string-match-p
+             (regexp-quote
+              "c.setAttribute('aria-label','Remove pinned highlight: '+term)")
+             html))
     (should (string-match-p (regexp-quote "@media (prefers-reduced-motion:reduce)") html))
     (should (string-match-p (regexp-quote "button:focus-visible") html))))
 
@@ -2573,7 +2581,7 @@ never inline scripts."
         (should (equal (plist-get obj :markdown) content))))))
 
 (ert-deftest doclive-test-snapshot-revision-is-monotonic ()
-  "Each snapshot should increment the revision exposed to clients."
+  "Each snapshot should increment revision and reuse unchanged Org HTML."
   (with-temp-buffer
     (insert "# Rev\n")
     (let* ((first (doclive--snapshot-buffer (current-buffer)))
@@ -2581,7 +2589,23 @@ never inline scripts."
       (should (equal (plist-get first :revision) 1))
       (doclive--snapshot-buffer (current-buffer))
       (let ((obj (doclive-test--json-plist (doclive--json-for-id id))))
-        (should (equal (plist-get obj :revision) 2))))))
+        (should (equal (plist-get obj :revision) 2)))))
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Heading\n")
+    (let ((exports 0))
+      (cl-letf (((symbol-function 'doclive--org-to-html)
+                 (lambda (_text)
+                   (setq exports (1+ exports))
+                   "<h1>Heading</h1>")))
+        (doclive--snapshot-buffer (current-buffer))
+        (should (= exports 1))
+        (let ((second (doclive--snapshot-buffer (current-buffer))))
+          (should (= exports 1))
+          (should (= (plist-get second :revision) 2)))
+        (insert "Body\n")
+        (doclive--snapshot-buffer (current-buffer))
+        (should (= exports 2))))))
 
 (ert-deftest doclive-test-org-to-html-error-fallback-is-escaped ()
   "Org export failures should render as an escaped error block."
@@ -2645,7 +2669,7 @@ never inline scripts."
 ;; Linked-document live preview
 
 (ert-deftest doclive-test-open-linked-document-enables-preview-mode ()
-  "Linked documents should join the live preview like the primary buffer."
+  "Linked documents should join live preview with one initial snapshot."
   (doclive-test--with-temp-linked-files
    '(("a.md" . "# A\n\n[go](b.md)\n")
      ("b.md" . "# B\n"))
@@ -2658,7 +2682,10 @@ never inline scripts."
              (doclive--open-linked-document (doclive--buffer-id buf) "b.md")
              (setq target (find-buffer-visiting (expand-file-name "b.md" dir)))
              (should target)
-             (should (buffer-local-value 'doclive-preview-mode target)))
+             (should (buffer-local-value 'doclive-preview-mode target))
+             (should (= (plist-get (doclive--get-entry (doclive--buffer-id target))
+                                   :revision)
+                        1)))
          (dolist (b (list buf target))
            (when (buffer-live-p b)
              (kill-buffer b))))))))
