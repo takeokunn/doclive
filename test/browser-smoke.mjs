@@ -216,7 +216,7 @@ try {
   };
 
   await waitFor("document.querySelector('#md h1')?.textContent === 'Browser Smoke'", "initial rendering");
-  assert(await evaluate("document.querySelector('#status').textContent.includes('live') && document.querySelector('#status').textContent.includes('browser-smoke.md')"), "live status was not rendered");
+  await waitFor("document.querySelector('#status').textContent.includes('live') && document.querySelector('#status').textContent.includes('browser-smoke.md')", "live status rendering");
 
   await evaluate("search.value='needle'; search.dispatchEvent(new Event('input',{bubbles:true})); pin.click();");
   assert(await evaluate("document.querySelectorAll('#md mark').length >= 2"), "search highlights were not rendered");
