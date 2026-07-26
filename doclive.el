@@ -5,7 +5,7 @@
 ;; Author: takeokunn <bararararatty@gmail.com>
 ;; Maintainer: takeokunn <bararararatty@gmail.com>
 ;; URL: https://github.com/takeokunn/doclive
-;; Version: 1.1.0
+;; Version: 1.2.0
 ;; Keywords: markdown org tools convenience
 ;; Package-Requires: ((emacs "29.1"))
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -88,7 +88,7 @@
 (defcustom doclive-host "127.0.0.1"
   "Host address for doclive local server."
   :type 'string
-  :package-version '(doclive . "1.1.0")
+  :package-version '(doclive . "1.2.0")
   :group 'doclive)
 
 (defcustom doclive-allow-non-loopback-host nil
@@ -96,13 +96,13 @@
 Keep this nil unless you understand that the preview server grants
 cookie-authenticated access to local document contents."
   :type 'boolean
-  :package-version '(doclive . "1.1.0")
+  :package-version '(doclive . "1.2.0")
   :group 'doclive)
 
 (defcustom doclive-port 39123
   "Port for doclive local server."
   :type 'natnum
-  :package-version '(doclive . "1.1.0")
+  :package-version '(doclive . "1.2.0")
   :group 'doclive)
 
 (defun doclive-xwidget-available-p ()
@@ -130,14 +130,14 @@ cookie-authenticated access to local document contents."
 The default uses xwidget WebKit when available and falls back to
 `browse-url' otherwise."
   :type 'function
-  :package-version '(doclive . "1.1.0")
+  :package-version '(doclive . "1.2.0")
   :group 'doclive)
 
 (defcustom doclive-change-debounce-ms 150
   "Debounce delay in milliseconds for after-change snapshots.
 Lower values give faster preview but more CPU usage."
   :type 'natnum
-  :package-version '(doclive . "1.1.0")
+  :package-version '(doclive . "1.2.0")
   :group 'doclive)
 
 (defcustom doclive-preview-asset-urls
@@ -154,7 +154,7 @@ variable if you want to mirror the assets locally or swap CDNs.
 Each URL must be an absolute http(s) URL or a same-origin relative
 URL."
   :type '(alist :key-type symbol :value-type string)
-  :package-version '(doclive . "1.1.0")
+  :package-version '(doclive . "1.2.0")
   :group 'doclive)
 
 (defconst doclive--preview-asset-keys
@@ -172,7 +172,7 @@ URL."
 When nil, doclive opens linked Markdown and Org documents only when
 they resolve under the current document's directory."
   :type 'boolean
-  :package-version '(doclive . "1.1.0")
+  :package-version '(doclive . "1.2.0")
   :group 'doclive)
 
 (defvar doclive--server nil
@@ -648,14 +648,23 @@ and `#+SETUPFILE:' run independently of Babel."
   (doclive--cleanup-stale-entries)
   (let* ((entry (doclive--ensure-entry buffer))
          (id (plist-get entry :id))
-         (text (with-current-buffer buffer
-                  (buffer-substring-no-properties (point-min) (point-max))))
          (org-buffer-p (doclive--org-buffer-p buffer))
+         (source-tick (with-current-buffer buffer
+                        (buffer-chars-modified-tick)))
+         (reuse-org-html-p
+          (and org-buffer-p
+               (equal source-tick (plist-get entry :source-tick))
+               (string= (plist-get entry :content-kind) "org-html")))
+         (text (unless reuse-org-html-p
+                 (with-current-buffer buffer
+                   (buffer-substring-no-properties (point-min) (point-max)))))
          (rev (1+ (or (plist-get entry :revision) 0))))
     (setf (plist-get entry :revision) rev)
+    (setf (plist-get entry :source-tick) source-tick)
     (setf (plist-get entry :content-kind) (if org-buffer-p "org-html" "markdown"))
     (setf (plist-get entry :markdown) (if org-buffer-p "" text))
-    (setf (plist-get entry :html) (if org-buffer-p (doclive--org-to-html text) ""))
+    (unless reuse-org-html-p
+      (setf (plist-get entry :html) (if org-buffer-p (doclive--org-to-html text) "")))
     (doclive--put-entry id entry)
     (doclive--broadcast-revision id rev)
     entry))
@@ -767,10 +776,12 @@ Return nil when VALUE is not valid percent-encoded data."
       (let ((enable-local-variables nil)
             (enable-local-eval nil))
         (let* ((buf (find-file-noselect full))
-               (new-entry (with-current-buffer buf
-                            (unless doclive-preview-mode
-                              (doclive-preview-mode 1))
-                            (doclive--snapshot-buffer buf)))
+               (new-entry
+                (with-current-buffer buf
+                  (if doclive-preview-mode
+                      (doclive--snapshot-buffer buf)
+                    (doclive-preview-mode 1)
+                    (doclive--get-entry (doclive--buffer-id buf)))))
                (new-id (plist-get new-entry :id)))
           (json-encode `((ok . t)
                          (buffer_id . ,new-id)
@@ -820,23 +831,8 @@ SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
     "\r\n")
    "\r\n"))
 
-(defun doclive--preview-html (&optional script-nonce)
-  "Return the complete self-contained preview HTML page.
-The page embeds marked.js for Markdown rendering, highlight.js for
-syntax highlighting, KaTeX for math typesetting with comprehensive
-LaTeX environment support, Mermaid.js for diagram rendering, and an
-SSE client for live-update support.  SCRIPT-NONCE is applied to inline
-runtime script and style when it is safe for CSP nonce use."
+(defconst doclive--preview-css
   (concat
-   "<!doctype html><html><head><meta charset='utf-8'>"
-   "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-   "<meta name='referrer' content='no-referrer'>"
-   "<title>doclive</title><link rel='icon' href='data:,'>"
-   "<link rel='stylesheet' href='" (doclive--preview-asset-url 'highlight-css) "'"
-   (doclive--preview-asset-integrity-attrs 'highlight-css) ">"
-   "<link rel='stylesheet' href='" (doclive--preview-asset-url 'katex-css) "'"
-   (doclive--preview-asset-integrity-attrs 'katex-css) ">"
-   "<style>"
    ":root{--mono:ui-monospace,'SF Mono','JetBrains Mono','Cascadia Code',Menlo,Consolas,monospace;--serif:'Iowan Old Style',Charter,'Source Serif 4',Georgia,serif;--bg:#0c0f14;--bg-raise:#11151d;--panel:#10141c;--surface-glass:rgba(12,15,20,.82);--text:#e9edf5;--muted:#8e98ac;--border:rgba(148,163,184,.16);--accent:#a78bfa;--accent-strong:#c4b0ff;--accent-ink:#160e33;--pin:#e0b458;--danger:#f87171;--mark:#f5d76e;--code-bg:#0d1117;--code-text:#e6edf3;--ok:#4ade80;}"
    "body[data-theme='light']{--bg:#f7f6f2;--bg-raise:#fffefb;--panel:#fbfaf6;--surface-glass:rgba(247,246,242,.88);--text:#232733;--muted:#69707f;--border:rgba(35,39,51,.14);--accent:#6d3fc4;--accent-strong:#5b21b6;--accent-ink:#f4f0ff;--pin:#9a6a00;--danger:#b91c1c;--mark:#ffe08a;--code-bg:#14181f;--code-text:#e6edf3;--ok:#15803d;}"
    "*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--serif);padding-bottom:48px;}"
@@ -899,35 +895,11 @@ runtime script and style when it is safe for CSP nonce use."
    "@keyframes doclive-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}"
    "@keyframes doclive-blink{50%{opacity:0}}"
    "@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}"
-   "@media (max-width:980px){.layout{grid-template-columns:1fr}.toc{position:relative;top:auto;height:auto;max-height:240px;border-right:none;border-bottom:1px solid var(--border)}.md{padding:24px 16px 64px}}"
-   "</style></head><body>"
-   "<div class='layout'><aside class='toc'><h2>Outline</h2><nav id='toc'></nav></aside>"
-   "<main class='main'>"
-   "<div class='toolbar' role='toolbar' aria-label='Preview controls'>"
-   "<header class='hero'><h1 class='wordmark'>doclive workspace<span class='caret' aria-hidden='true'></span></h1></header>"
-   "<button id='back' aria-label='Back'>←</button><button id='forward' aria-label='Forward'>→</button>"
-   "<input id='search' placeholder='Find in page' aria-label='Find in page'>"
-   "<button id='pin' class='primary'>Pin</button>"
-   "<span class='chips' id='chips'></span>"
-   "<select id='theme' aria-label='Theme'><option value='dark'>Dark</option><option value='light'>Light</option></select>"
-   "<button id='zoom-out' aria-label='Zoom out'>A-</button><button id='zoom-reset' aria-label='Reset zoom'>A</button><button id='zoom-in' aria-label='Zoom in'>A+</button>"
-   "</div>"
-   "<article id='md' class='md'></article></main></div>"
-   "<footer class='modeline'><span class='dot' id='dot'></span><span id='status'>connecting…</span><span class='spacer'></span><span id='scrollpos'>Top</span></footer>"
-   "<script src='" (doclive--preview-asset-url 'marked-script) "'"
-   (doclive--preview-asset-integrity-attrs 'marked-script) "></script>"
-   "<script src='" (doclive--preview-asset-url 'highlight-script) "'"
-   (doclive--preview-asset-integrity-attrs 'highlight-script) "></script>"
-   "<script src='" (doclive--preview-asset-url 'katex-script) "'"
-   (doclive--preview-asset-integrity-attrs 'katex-script) "></script>"
-   "<script src='" (doclive--preview-asset-url 'katex-auto-render-script) "'"
-   (doclive--preview-asset-integrity-attrs 'katex-auto-render-script) "></script>"
-   "<script src='" (doclive--preview-asset-url 'mermaid-script) "'"
-   (doclive--preview-asset-integrity-attrs 'mermaid-script) "></script>"
-   "<script"
-   (let ((nonce (doclive--browser-script-nonce script-nonce)))
-     (if nonce (concat " nonce='" (doclive--escape-html-attribute nonce) "'") ""))
-   ">"
+   "@media (max-width:980px){.layout{grid-template-columns:1fr}.toc{position:relative;top:auto;height:auto;max-height:240px;border-right:none;border-bottom:1px solid var(--border)}.md{padding:24px 16px 64px}}")
+  "CSS stylesheet for the doclive preview page.")
+
+(defconst doclive--preview-js
+  (concat
    "const qs=new URLSearchParams(location.search); let currentId=qs.get('id');"
    "function scrubSensitiveQueryFromLocation(){let dirty=false; const clean=new URLSearchParams(); qs.forEach((value,key)=>{const lower=(key||'').toLowerCase(); if(lower==='bootstrap'||lower==='token'){dirty=true; return;} clean.append(key,value);}); if(!dirty) return; const q=clean.toString(); history.replaceState({id:currentId},'',q?'?'+q:location.pathname);}"
    "const statusEl=document.getElementById('status'); const mdEl=document.getElementById('md'); const tocEl=document.getElementById('toc');"
@@ -946,7 +918,7 @@ runtime script and style when it is safe for CSP nonce use."
    "function parseFrontmatter(md){if(!md.startsWith('---\\n')) return {front:null,body:md}; const end=md.indexOf('\\n---\\n',4); if(end===-1) return {front:null,body:md}; const raw=md.slice(4,end).trim(); const body=md.slice(end+5); const map={}; raw.split('\\n').forEach(line=>{const i=line.indexOf(':'); if(i>0){const k=line.slice(0,i).trim(); const v=line.slice(i+1).trim(); map[k]=v;}}); return {front:map,body};}"
    "function escapeHtml(s){return String(s==null?'':s).replace(/[&<>\"']/g,(ch)=>{if(ch==='&') return '&amp;'; if(ch==='<') return '&lt;'; if(ch==='>') return '&gt;'; if(ch==='\"') return '&quot;'; return '&#39;';});}"
    "function sanitizeUrlValue(value,allowMailto=false){const raw=String(value==null?'':value); const trimmed=raw.trim(); const folded=trimmed.replace(/[\\u0000-\\u001F\\u007F\\s]+/g,'').toLowerCase(); if(!folded||folded.startsWith('//')||trimmed.indexOf(String.fromCharCode(92))!==-1) return ''; if(/[\\u0000-\\u001F\\u007F\\s]/.test(trimmed)) return ''; if(/^[a-z][a-z0-9+.-]*:/.test(folded)&&!(/^https?:/.test(folded)||(allowMailto&&folded.startsWith('mailto:')))) return ''; return trimmed;}"
-  "function sanitizeHtml(html,allowTrustedStyles=false){const tpl=document.createElement('template'); tpl.innerHTML=html||''; const removed=allowTrustedStyles?'script,iframe,object,embed,link,meta,base':'script,iframe,object,embed,link,meta,base,style'; tpl.content.querySelectorAll(removed).forEach((el)=>el.remove()); const walker=document.createTreeWalker(tpl.content,NodeFilter.SHOW_ELEMENT); const nodes=[]; while(walker.nextNode()) nodes.push(walker.currentNode); nodes.forEach((el)=>{Array.from(el.attributes).forEach((attr)=>{const name=attr.name||''; const lower=name.toLowerCase(); if(/^on/i.test(name)||(lower==='style'&&!allowTrustedStyles)||lower==='srcset'||lower==='ping'){el.removeAttribute(attr.name); return;} if(/^(href|src|xlink:href|formaction|action|poster)$/i.test(name)){const allowMailto=/^(href|xlink:href)$/i.test(name); const safe=sanitizeUrlValue(attr.value||'',allowMailto); if(safe){el.setAttribute(attr.name,safe);}else{el.removeAttribute(attr.name);}}}); if(el.tagName&&el.tagName.toLowerCase()==='a'&&(el.getAttribute('target')||'').toLowerCase()==='_blank'){el.setAttribute('rel','noopener noreferrer');}}); return tpl.innerHTML;}"
+   "function sanitizeHtml(html,allowTrustedStyles=false){const tpl=document.createElement('template'); tpl.innerHTML=html||''; const removed=allowTrustedStyles?'script,iframe,object,embed,link,meta,base':'script,iframe,object,embed,link,meta,base,style'; tpl.content.querySelectorAll(removed).forEach((el)=>el.remove()); const walker=document.createTreeWalker(tpl.content,NodeFilter.SHOW_ELEMENT); const nodes=[]; while(walker.nextNode()) nodes.push(walker.currentNode); nodes.forEach((el)=>{Array.from(el.attributes).forEach((attr)=>{const name=attr.name||''; const lower=name.toLowerCase(); if(/^on/i.test(name)||(lower==='style'&&!allowTrustedStyles)||lower==='srcset'||lower==='ping'){el.removeAttribute(attr.name); return;} if(/^(href|src|xlink:href|formaction|action|poster)$/i.test(name)){const allowMailto=/^(href|xlink:href)$/i.test(name); const safe=sanitizeUrlValue(attr.value||'',allowMailto); if(safe){el.setAttribute(attr.name,safe);}else{el.removeAttribute(attr.name);}}}); if(el.tagName&&el.tagName.toLowerCase()==='a'&&(el.getAttribute('target')||'').toLowerCase()==='_blank'){el.setAttribute('rel','noopener noreferrer');}}); return tpl.innerHTML;}"
    "function setSanitizedSvg(container,svg){const tpl=document.createElement('template'); tpl.innerHTML=sanitizeHtml(svg||'',true); const root=tpl.content.firstElementChild; if(!root||root.tagName.toLowerCase()!=='svg'||tpl.content.childElementCount!==1) throw new Error('invalid mermaid svg'); container.replaceChildren(root.cloneNode(true));}"
    "function renderFrontmatter(front){if(!front) return ''; const rows=Object.entries(front).map(([k,v])=>`<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`).join(''); return `<details class=\"frontmatter\" open><summary>Frontmatter</summary><table>${rows}</table></details>`;}"
    "let tocLinks=new Map(); let tocHeadings=[];"
@@ -998,7 +970,7 @@ runtime script and style when it is safe for CSP nonce use."
    "function replaceTextNode(node,re,cls){const text=node.nodeValue; let m,last=0; const frag=document.createDocumentFragment(); while((m=re.exec(text))!==null){if(m.index>last) frag.appendChild(document.createTextNode(text.slice(last,m.index))); const mark=document.createElement('mark'); mark.className=cls; mark.textContent=m[0]; frag.appendChild(mark); last=re.lastIndex; if(re.lastIndex===m.index) re.lastIndex++;} if(last<text.length) frag.appendChild(document.createTextNode(text.slice(last))); node.parentNode.replaceChild(frag,node);}"
    "function walkAndHighlight(root,re,cls){const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode(n){if(!n.nodeValue.trim()) return NodeFilter.FILTER_REJECT; const p=n.parentNode; if(!p) return NodeFilter.FILTER_REJECT; if(p.closest&&p.closest('script,style,code,pre,.katex,svg')) return NodeFilter.FILTER_REJECT; return NodeFilter.FILTER_ACCEPT;}}); const nodes=[]; while(walker.nextNode()) nodes.push(walker.currentNode); nodes.forEach(n=>replaceTextNode(n,re,cls));}"
    "function applyHighlights(){const html=mdEl.getAttribute('data-base-html')||mdEl.innerHTML; mdEl.innerHTML=html; highlightCodeBlocks(); const q=(searchEl.value||'').trim(); if(q){walkAndHighlight(mdEl,new RegExp(escReg(q),'gi'),'mark-pin-0');} pinned.forEach((term,idx)=>{if(term){walkAndHighlight(mdEl,new RegExp(escReg(term),'gi'),'mark-pin-'+(idx%4));}}); wireCopy(); wireDocumentLinkNavigation();}"
-   "function renderChips(){chipsEl.innerHTML=''; pinned.forEach((term,idx)=>{const el=document.createElement('span'); el.className='chip'; const label=document.createElement('b'); label.textContent=term; el.appendChild(label); const c=document.createElement('button'); c.className='chip-close'; c.textContent='×'; c.onclick=()=>{pinned=pinned.filter((_,i)=>i!==idx); applyHighlights(); renderChips();}; el.appendChild(c); chipsEl.appendChild(el);});}"
+   "function renderChips(){chipsEl.innerHTML=''; pinned.forEach((term,idx)=>{const el=document.createElement('span'); el.className='chip'; const label=document.createElement('b'); label.textContent=term; el.appendChild(label); const c=document.createElement('button'); c.className='chip-close'; c.textContent='×'; c.setAttribute('aria-label','Remove pinned highlight: '+term); c.onclick=()=>{pinned=pinned.filter((_,i)=>i!==idx); applyHighlights(); renderChips();}; el.appendChild(c); chipsEl.appendChild(el);});}"
    "function normalizeTheme(theme){return theme==='light'?'light':'dark';}"
    "function getStoredTheme(){try{return localStorage.getItem('doclive-theme');}catch(e){return null;}}"
    "function storeTheme(theme){try{localStorage.setItem('doclive-theme',theme);}catch(e){}}"
@@ -1022,7 +994,56 @@ runtime script and style when it is safe for CSP nonce use."
    "document.getElementById('forward').addEventListener('click',async()=>{if(navIndex>=navStack.length-1) return; navIndex++; currentId=navStack[navIndex].id; updateNavButtons(); lastRev=-1; connectSSE(); const j=await fetchContent(); await applyContent(j);});"
    "applyTheme(getStoredTheme());"
    "scrubSensitiveQueryFromLocation();"
-   "(async()=>{try{const j=await fetchContent(); await applyContent(j);}catch(e){statusEl.textContent='initial load failed'; dotEl.className='dot dot-disconnected';} connectSSE();})();"
+   "(async()=>{try{const j=await fetchContent(); await applyContent(j);}catch(e){statusEl.textContent='initial load failed'; dotEl.className='dot dot-disconnected';} connectSSE();})();")
+  "Client-side JavaScript for the doclive preview page.")
+
+(defun doclive--preview-html (&optional script-nonce)
+  "Return the complete self-contained preview HTML page.
+The page embeds marked.js for Markdown rendering, highlight.js for
+syntax highlighting, KaTeX for math typesetting with comprehensive
+LaTeX environment support, Mermaid.js for diagram rendering, and an
+SSE client for live-update support.  SCRIPT-NONCE is applied to inline
+runtime script and style when it is safe for CSP nonce use."
+  (concat
+   "<!doctype html><html><head><meta charset='utf-8'>"
+   "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+   "<meta name='referrer' content='no-referrer'>"
+   "<title>doclive</title><link rel='icon' href='data:,'>"
+   "<link rel='stylesheet' href='" (doclive--preview-asset-url 'highlight-css) "'"
+   (doclive--preview-asset-integrity-attrs 'highlight-css) ">"
+   "<link rel='stylesheet' href='" (doclive--preview-asset-url 'katex-css) "'"
+   (doclive--preview-asset-integrity-attrs 'katex-css) ">"
+   "<style>"
+   doclive--preview-css
+   "</style></head><body>"
+   "<div class='layout'><aside class='toc'><h2>Outline</h2><nav id='toc'></nav></aside>"
+   "<main class='main'>"
+   "<div class='toolbar' role='toolbar' aria-label='Preview controls'>"
+   "<header class='hero'><h1 class='wordmark'>doclive workspace<span class='caret' aria-hidden='true'></span></h1></header>"
+   "<button id='back' aria-label='Back'>←</button><button id='forward' aria-label='Forward'>→</button>"
+   "<input id='search' placeholder='Find in page' aria-label='Find in page'>"
+   "<button id='pin' class='primary'>Pin</button>"
+   "<span class='chips' id='chips'></span>"
+   "<select id='theme' aria-label='Theme'><option value='dark'>Dark</option><option value='light'>Light</option></select>"
+   "<button id='zoom-out' aria-label='Zoom out'>A-</button><button id='zoom-reset' aria-label='Reset zoom'>A</button><button id='zoom-in' aria-label='Zoom in'>A+</button>"
+   "</div>"
+   "<article id='md' class='md'></article></main></div>"
+   "<footer class='modeline'><span class='dot' id='dot' aria-hidden='true'></span><span id='status' role='status' aria-live='polite' aria-atomic='true'>connecting…</span><span class='spacer'></span><span id='scrollpos'>Top</span></footer>"
+   "<script src='" (doclive--preview-asset-url 'marked-script) "'"
+   (doclive--preview-asset-integrity-attrs 'marked-script) "></script>"
+   "<script src='" (doclive--preview-asset-url 'highlight-script) "'"
+   (doclive--preview-asset-integrity-attrs 'highlight-script) "></script>"
+   "<script src='" (doclive--preview-asset-url 'katex-script) "'"
+   (doclive--preview-asset-integrity-attrs 'katex-script) "></script>"
+   "<script src='" (doclive--preview-asset-url 'katex-auto-render-script) "'"
+   (doclive--preview-asset-integrity-attrs 'katex-auto-render-script) "></script>"
+   "<script src='" (doclive--preview-asset-url 'mermaid-script) "'"
+   (doclive--preview-asset-integrity-attrs 'mermaid-script) "></script>"
+   "<script"
+   (let ((nonce (doclive--browser-script-nonce script-nonce)))
+     (if nonce (concat " nonce='" (doclive--escape-html-attribute nonce) "'") ""))
+   ">"
+   doclive--preview-js
    "</script></body></html>"))
 
 (defun doclive--parse-request-path (request-line)

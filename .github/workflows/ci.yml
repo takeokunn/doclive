@@ -20,7 +20,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
 
     steps:
       - name: Checkout
@@ -37,8 +37,8 @@ jobs:
       - name: Run release gate
         run: nix develop --command make check
 
-      - name: Run flake checks
-        run: nix flake check
+      - name: Validate flake outputs
+        run: nix flake check --no-build
 
   emacs-compat:
     name: emacs-compat (${{ matrix.emacs-version }})
@@ -52,7 +52,7 @@ jobs:
           # Minimum supported version declared in Package-Requires.
           - '29.1'
           # Latest stable release.
-          - '30.1'
+          - '30.2'
         include:
           - emacs-version: snapshot
             experimental: true
@@ -86,7 +86,7 @@ jobs:
       matrix:
         emacs-version:
           - '29.1'
-          - '30.1'
+          - '30.2'
 
     steps:
       - name: Checkout

@@ -1,4 +1,5 @@
 EMACS ?= emacs
+NODE ?= node
 ZSH ?= zsh
 EMACS_BATCH = $(EMACS) -Q --batch -L . -L test
 
@@ -6,9 +7,9 @@ SRC = doclive.el
 TEST = test/doclive-test-helpers.el test/doclive-test.el
 AUTOLOAD_SYMBOLS = doclive-start-server doclive-stop-server doclive-preview-mode doclive-preview-buffer doclive-preview-file doclive-reload-page
 
-.PHONY: check compile test lint package-lint autoloads security smoke check-assets clean
+.PHONY: check compile test lint package-lint autoloads check-js browser-smoke security smoke check-assets clean
 
-check: compile test lint package-lint autoloads security smoke
+check: compile test lint package-lint autoloads check-js browser-smoke security smoke
 	git diff --check
 
 compile:
@@ -48,6 +49,12 @@ autoloads:
 	  DOCLIVE_AUTOLOAD_SYMBOL="$$symbol" perl -0ne 'BEGIN { $$needle = "(autoload " . chr(39) . $$ENV{"DOCLIVE_AUTOLOAD_SYMBOL"} } { $$contents .= $$_ } END { exit(index($$contents, $$needle) >= 0 ? 0 : 1) }' "$$tmp" \
 	    || { echo "missing autoload for $$symbol" >&2; exit 1; }; \
 	done
+
+check-js:
+	$(ZSH) ./test/check-preview-js.zsh
+
+browser-smoke:
+	CHROMIUM_BIN="$${CHROMIUM_BIN:-$$(command -v chromium)}" EMACS="$(EMACS)" $(NODE) ./test/browser-smoke.mjs
 
 security:
 	gitleaks detect --no-git --source .

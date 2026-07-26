@@ -43,6 +43,9 @@ jobs:
       - name: Run release gate
         run: nix develop --command make check
 
+      - name: Verify pinned CDN assets resolve
+        run: nix develop --command make check-assets
+
   publish:
     needs: gate
     runs-on: ubuntu-latest

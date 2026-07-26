@@ -244,6 +244,24 @@ make smoke
 CI additionally verifies the declared minimum Emacs version (29.1),
 the latest stable release, and a development snapshot.
 
+** Snapshot benchmark
+
+Run the batch benchmark from the repository root:
+
+#+begin_src sh
+emacs -Q --batch -L . -l benchmark/snapshot.el
+#+end_src
+
+The harness builds a deterministic Org document of approximately 100 KB,
+then measures one initial =doclive--snapshot-buffer= export and repeated
+refreshes without source changes.  Its output includes the exact input size,
+Emacs and Org versions, iteration count, and elapsed times.
+
+These numbers describe only the snapshot/export path on the machine running
+the command.  They depend on the Emacs and Org versions, hardware, operating
+system, and current system load; they are not a cross-project or
+cross-environment performance ranking.
+
 * Troubleshooting
 
 - Mermaid / KaTeX / highlight.js load from external CDNs in the
