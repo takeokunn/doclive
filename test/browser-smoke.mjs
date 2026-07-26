@@ -245,5 +245,14 @@ try {
     server.close((error) => error ? reject(error) : resolve());
     server.closeAllConnections();
   });
-  await rm(profile, { recursive: true, force: true });
+  const cleanupDeadline = Date.now() + 5000;
+  for (;;) {
+    try {
+      await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      break;
+    } catch (error) {
+      if (error.code !== "ENOTEMPTY" || Date.now() >= cleanupDeadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
 }
