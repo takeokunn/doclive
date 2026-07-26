@@ -28,7 +28,7 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@a7ad9c4f0c65208097f4d34f3cfa1913b80cce5c
 
       - name: Update flake.lock
-        uses: DeterminateSystems/update-flake-lock@fd9359ac79d0e912f1b4b947a48470b3e2799b56
+        uses: DeterminateSystems/update-flake-lock@ec13d37c32ca75bc750ecc133e944e5a18164688
         with:
           pr-title: 'chore: update flake.lock'
           pr-labels: dependencies
