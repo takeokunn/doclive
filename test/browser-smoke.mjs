@@ -129,6 +129,14 @@ const browser = spawn(chromium, [
   `--user-data-dir=${profile}`,
   "about:blank",
 ], { stdio: ["ignore", "ignore", "pipe"] });
+const browserExit = new Promise((resolve) => browser.once("exit", resolve));
+const waitForBrowserExit = (timeout) => new Promise((resolve) => {
+  const timer = setTimeout(() => resolve(false), timeout);
+  browserExit.then(() => {
+    clearTimeout(timer);
+    resolve(true);
+  });
+});
 
 let browserStderr = "";
 const websocketUrl = await new Promise((resolve, reject) => {
@@ -226,8 +234,16 @@ try {
   process.stdout.write("browser smoke passed: render, status, search/pin, theme, zoom\n");
 } finally {
   socket.close();
-  browser.kill("SIGTERM");
   for (const stream of openStreams) stream.end();
-  await new Promise((resolve) => server.close(resolve));
+  browser.kill("SIGTERM");
+  const exitedAfterSigterm = await waitForBrowserExit(5000);
+  if (!exitedAfterSigterm) {
+    browser.kill("SIGKILL");
+    await browserExit;
+  }
+  await new Promise((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+    server.closeAllConnections();
+  });
   await rm(profile, { recursive: true, force: true });
 }
