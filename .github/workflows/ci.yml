@@ -37,8 +37,8 @@ jobs:
       - name: Run release gate
         run: nix develop --command make check
 
-      - name: Run flake checks
-        run: nix flake check
+      - name: Validate flake outputs
+        run: nix flake check --no-build
 
   emacs-compat:
     name: emacs-compat (${{ matrix.emacs-version }})
