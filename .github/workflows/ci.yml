@@ -66,7 +66,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Emacs ${{ matrix.emacs-version }}
-        uses: purcell/setup-emacs@1f1e9c315c2e3312705e920ae1ddd7e0e2b13c69
+        uses: purcell/setup-emacs@d37e139fc118479b4396f9277927506a8c384519
         with:
           version: ${{ matrix.emacs-version }}
 
