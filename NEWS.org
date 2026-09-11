@@ -78,8 +78,8 @@
     preview, so edits to the linked buffer push updates as well.
   - A bind failure at server start (for example a busy port) now reports an
     actionable error naming ~doclive-port~ instead of a raw process error.
-  - Percent-encoded query values decode as UTF-8, making linked navigation to
-    non-ASCII file names robust across platforms.
+  - Percent-encoded query values decode as UTF-8, so linked navigation to
+    non-ASCII file names works on every platform.
   - Session tokens and CSP nonces read /dev/urandom directly when available
     instead of spawning an openssl subprocess per request.
   - ~doclive-stop-server~ also releases tracked buffer entries.
@@ -98,7 +98,7 @@
   - Markdown rendering via marked.js with syntax highlighting (highlight.js).
   - Org rendering via Emacs built-in ~org~ and ~ox-html~ (no Babel execution during preview).
   - Mermaid diagram rendering (backtick and tilde fences, ~mmd~ alias).
-  - Comprehensive KaTeX math typesetting with LaTeX environment support
+  - KaTeX math typesetting with LaTeX environment support
     (~equation~, ~align~, ~gather~, ~cases~, ~Bmatrix~, ~vmatrix~, and more).
   - TOC sidebar for document outline.
   - Code block copy buttons.

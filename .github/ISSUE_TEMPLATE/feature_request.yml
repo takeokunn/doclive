@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: >-
-        Check the Scope section of README.org first — WebSocket transport,
+        Check the Scope section of README.org first. WebSocket transport,
         remote file fetch, Org Babel execution, and Org publishing pipelines
         are intentionally out of scope.
   - type: textarea

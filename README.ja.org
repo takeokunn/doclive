@@ -1,6 +1,8 @@
 #+TITLE: doclive
 
 [[https://github.com/takeokunn/doclive/actions/workflows/ci.yml][https://github.com/takeokunn/doclive/actions/workflows/ci.yml/badge.svg]]
+[[https://www.gnu.org/licenses/gpl-3.0][https://img.shields.io/badge/License-GPL_v3+-blue.svg]]
+[[https://www.gnu.org/software/emacs/][https://img.shields.io/badge/Emacs-29.1+-7F5AB6.svg]]
 
 English version: [[file:README.org][README.org]]
 
@@ -8,20 +10,24 @@ English version: [[file:README.org][README.org]]
 
 doclive は、Markdown / Org を Emacs の xwidget WebKit で可視化するライブプレビュー用 Elisp パッケージです。
 SSE で更新を配信し、Emacs 内で扱いやすいようにリアルタイム同期します。
-AI が生成した Mermaid 図や LaTeX 数式（equation, align, gather, cases など）を網羅的に可視化できます。
+AI が生成した Mermaid 図や LaTeX 数式（equation, align, gather, cases など）を追加設定なしで表示できます。
 
 [[file:docs/images/preview-dark.png]]
+
+Light テーマ:
+
+[[file:docs/images/preview-light.png]]
 
 * Features
 
 - SSE によるライブ更新（150ms デバウンス付き）
 - xwidget WebKit による Emacs 内プレビュー。文書バッファの隣に別ウィンドウで開き（配置は変更可能）、
-  同じバッファへの再プレビューでは既存のプレビューバッファを使い回します（未対応 Emacs では外部ブラウザへフォールバック）
+  同じバッファで =doclive-preview-buffer= を再実行すると既存のプレビューバッファを使い回します（未対応 Emacs では外部ブラウザへフォールバック）
 - プレビューバッファ内で通常のコピー/ペーストキーを使い、選択テキストのコピーやページ内検索ができます
 - Markdown と Org のプレビュー表示。段落内の単独改行は GitHub の =.md= 表示と同様に改行として扱いません
 - Mermaid 図（バッククォート・チルダフェンス、mmd エイリアス対応）。原寸大でスクロール可能な枠内に表示し、
   Fit / 100% / Expand の操作と全画面表示でのズーム・パンに対応します
-- KaTeX 数式（equation, align, gather, cases など LaTeX 環境を網羅的にサポート）
+- KaTeX 数式（equation, align, gather, cases, Bmatrix, vmatrix などの LaTeX 環境に対応）
 - Highlight.js によるシンタックスハイライト
 - Markdown / Org のローカル相対リンク遷移 + 戻る/進む
 - TOC サイドバー
@@ -52,13 +58,6 @@ MELPA へ登録後は次の手順でインストールできます。
 #+begin_src emacs-lisp
 (use-package doclive
   :commands (doclive-preview-buffer doclive-preview-file doclive-stop-server doclive-reload-page))
-#+end_src
-
-** Manual
-
-#+begin_src emacs-lisp
-(add-to-list 'load-path "/path/to/doclive")
-(require 'doclive)
 #+end_src
 
 ** From source checkout
@@ -106,7 +105,7 @@ fragment や query はファイル解決時には無視され、remote URL や�
 M-x doclive-stop-server
 #+end_example
 
-サーバー停止時には現在の session cookie と未使用の bootstrap code が破棄されるため、既存の初回 preview URL は次回起動後に使い回せません。
+サーバー停止時には現在の session cookie と未使用の bootstrap code が破棄されるため、既存の初回 preview URL はサーバーの次回起動後に使い回せません。
 
 ** プレビュー再読み込み
 
@@ -116,9 +115,33 @@ M-x doclive-stop-server
 M-x doclive-reload-page
 #+end_example
 
+** キーバインド
+
+doclive は既定のキーバインドを提供しません。使うコマンドを好みのキーに割り当ててください。
+
+#+begin_src emacs-lisp
+(with-eval-after-load 'doclive
+  (define-key markdown-mode-map (kbd "C-c C-v") #'doclive-preview-buffer)
+  (define-key org-mode-map      (kbd "C-c C-v") #'doclive-preview-buffer))
+#+end_src
+
+=doclive-preview-buffer= は、メジャーモードが =org-mode= 派生か、ファイル名が =.org= で終わるバッファを Org として、それ以外を Markdown として扱います。
+
+*** プレビューバッファのキー
+
+doclive が開いた xwidget プレビューバッファでは、バッファローカルなマイナーモード =doclive-xwidget-preview-mode= が有効になります。
+バッファ名はプレビューページのタイトルから付け直され、文書名を含みます。
+このマイナーモードは独自のキーを追加せず、既存のコピー/ヤンクのキーをプレビューページに対して動作するようにリマップするだけです。
+
+- =kill-ring-save=（=M-w=）と macOS の =ns-copy-including-secondary=（=s-c=）は =doclive-xwidget-copy-selection= にリマップされ、ページ内で選択中のテキストを kill ring に入れます。
+- =yank=（=C-y=, =s-v=）は =doclive-xwidget-yank-to-search= にリマップされ、kill ring の先頭をページ内検索ボックスに入れてハイライトします。
+
+プレビューバッファでのそれ以外のキー入力は、Emacs 標準の =xwidget-webkit-edit-mode= を有効にしない限り、ページではなく Emacs 側に渡ります。
+
 * Customization
 
 - =doclive-host= : bind host
+- =doclive-allow-non-loopback-host= : 非 loopback host への bind を許可するか（既定 nil）
 - =doclive-port= : bind port
 - =doclive-open-browser-function= : URL オープン関数（既定は xwidget 優先）
 - =doclive-xwidget-display-buffer-action= : xwidget プレビューウィンドウを配置する =display-buffer= アクション（既定は文書ウィンドウの右側）
@@ -134,14 +157,16 @@ doclive はローカルHTTPサーバーを起動し、既定では =127.0.0.1= �
 この Cookie は既定の plain HTTP / loopback-only サーバーで動作させるため =Secure= 属性を付けません。非loopback host を明示的に許可する場合は、そのネットワーク経路を信頼済みとして扱うか、必要に応じて外側で transport protection を用意してください。
 以後の =/content= / =/open= / =/events= は query token ではなく Cookie で認可します。
 =token= query parameter を含む request は、有効な Cookie があっても拒否します。
-URL / SSE / JSON payload に出る buffer id は、buffer ごとの opaque random routing identifier です。
+URL / SSE / JSON payload に出る buffer id は、session cookie とは別の、buffer ごとの opaque random routing identifier です。
 これは認可秘密ではなく、ローカルファイルパスや buffer 名から生成しません。
 サーバー停止時には session token と未使用の bootstrap code を破棄し、次回起動時に新しい session token を生成します。
 また、バッファで =doclive-preview-mode= を無効化すると、そのバッファの preview entry、SSE client、更新 timer を削除し、以後は配信対象から外します。
 未使用の bootstrap code を含むURLは共有・ログ貼り付け・公開スクリーンショットへの写り込みを避けてください。
 preview HTML と HTTP response は =no-referrer= を設定し、bootstrap code を含む初回URLが外部CDNへの Referer として送られないようにします。
 inline runtime script は session cookie とは別の response-local nonce で許可され、request-line は origin-form の絶対パスだけを受け付けます。nonce のない inline script は常に拒否されます。
-=style-src= は inline style を許可します。KaTeX と Mermaid は生成した style 属性や SVG 内 style 要素で描画結果を配置するため、CSP nonce では原理的に許可できないためです。代わりに、文書由来の HTML からは sanitizer が =style= 要素と =style= 属性を DOM 挿入前に除去し、信頼済みの Mermaid SVG 出力（=securityLevel: strict= で生成）だけが自身のスタイルを保持します。
+=style-src= は inline style を許可します。KaTeX と Mermaid は生成した style 属性や SVG 内 style 要素で描画結果を配置し、これらは CSP nonce では許可できないためです。文書由来の HTML については、sanitizer が =style= 要素と =style= 属性を DOM 挿入前に除去するため、この許可の対象になりません。信頼済みの Mermaid SVG 出力（=securityLevel: strict= で生成）だけが自身のスタイルを保持します。
+この SVG は文書ではなく Mermaid のレンダラが生成します。=strict= では Mermaid が図ラベル内の HTML をエンコードし click 指定を無効にするため、図のソースからマークアップやハンドラを注入できません。
+サーバーはディスク上のファイルを配信しません。ルートはプレビューページ、=/content=、=/open=、=/events= だけなので、文書から到達できるローカルファイルは相対リンク先の =.md= / =.org= に限られ、その範囲はローカルリンク遷移の節のとおり制限されます。
 
 非loopback hostに bind すると、同一ネットワーク上のブラウザからも到達可能になります。
 必要な場合だけ =doclive-host= を変更し、=doclive-allow-non-loopback-host= を非nilにしてください。
@@ -156,6 +181,14 @@ preview URL は信頼できる相手以外へ渡さないでください。
 ローカルリンク遷移は既定でクリック元ファイルのディレクトリ配下に限定されます。
 この判定はシンボリックリンク解決後の実パスで行うため、クリック元ディレクトリ内のリンク名が外部ファイルを指していても既定では開きません。
 これにより、外部から受け取った文書内の =../secret.md= や外部ファイルへ向くシンボリックリンクを誤クリックして、意図しないローカル Markdown / Org をプレビューへ読み込むリスクを下げます。
+
+報告手順と境界の全体像は [[file:SECURITY.md][SECURITY.md]] を参照してください。
+
+* Comparison with alternatives
+
+- =markdown-preview-mode= / =grip= :: Markdown のみを描画します。doclive は Org、Mermaid、KaTeX も描画し、両形式を 1 つの SSE サーバーでライブ更新します。
+- =org-preview-html= :: 変更ごとに Org を静的ファイルへ export します。doclive はファイルシステムに書かずに差分を push します。
+- doclive は WebSocket 化、remote file fetch、Org Babel 実行、Org publishing を意図的に対象外としています（[[*Scope][Scope]] を参照）。
 
 * Development
 
@@ -173,10 +206,15 @@ make test
 make lint
 make package-lint
 make autoloads
+make check-js
+make browser-smoke
 make security
 make smoke
+git diff --check
 #+end_src
 
+=make check-js= は埋め込みプレビュー JavaScript の構文を検査し、=make browser-smoke= は headless Chromium でプレビューページを操作します。
+Chromium / Google Chrome が =PATH= にない場合は =CHROMIUM_BIN= で実行ファイルを指定してください。
 =make security= は secret scan、GitHub Actions lint、workflow security scan を実行します。
 これらの CLI を個別に導入しない場合は =nix develop= で開発環境に入ってください。
 pre-commit を使う場合は、同じ最終ゲートを hook から実行できます。
@@ -185,33 +223,45 @@ pre-commit を使う場合は、同じ最終ゲートを hook から実行でき
 pre-commit run --all-files
 #+end_src
 
-Nix を使う場合は、compile / test / lint / package-lint / security / smoke を flake 経由でも確認できます。
-PR や release 前には autoload 生成と whitespace も確認するため、最終ゲートとして =make check= も実行してください。
+=nix flake check= は compile / test / lint / package-lint / security / smoke / browser-smoke を個別の sandbox で実行します。
+autoloads、check-js、=git diff --check= は =make check= だけが実行するため、PR や release 前には =make check= を最終ゲートとしてください。
 
 #+begin_src sh
 nix flake check
 #+end_src
 
-プレビュー smoke では =example/sample.md= と =example/sample.org= を使い、daemon 起動、初回 bootstrap、cookie 認可、=/content=、=/events=、=/open=、force restart、停止経路を確認します。
-自動ゲートは =make check= / =pre-commit run --all-files= / =nix flake check= で確認できます。
+daemon smoke では =example/sample.md= と =example/sample.org= を使い、daemon 起動、初回 bootstrap、cookie 認可、=/content=、=/events=、=/open=、force restart、停止経路を確認します。
 サーバ起動経路だけを単体で確認する場合は下記を実行してください。
 
 #+begin_src sh
 make smoke
 #+end_src
 
+CI では、宣言された最小 Emacs バージョン（29.1）、最新の安定版、開発スナップショットでも検証します。
+
+** Snapshot benchmark
+
+リポジトリのルートで次を実行します。
+
+#+begin_src sh
+emacs -Q --batch -L . -l benchmark/snapshot.el
+#+end_src
+
+約 100 KB の決定的な Org 文書を生成し、=doclive--snapshot-buffer= の初回 export と、変更なしでの再取得を繰り返し計測します。
+出力には入力サイズ、Emacs と Org のバージョン、反復回数、経過時間が含まれます。
+
+この数値は実行したマシンでの snapshot / export 経路だけを表します。
+Emacs と Org のバージョン、ハードウェア、OS、実行時の負荷に依存するため、プロジェクト間や環境間の性能比較には使えません。
+
 * Troubleshooting
 
-- Mermaid / KaTeX / Highlight.js はブラウザ側で外部資源を読み込みます。描画されない場合はブラウザ console と network log を確認してください。
-- ネットワーク制約がある環境では =doclive-preview-asset-urls= を自前のミラーやローカル配信先に差し替えてください。
-- port conflict がある場合は =doclive-port= を別の値に変更してください。
-- Org preview は Emacs built-in の =org= / =ox-html= で HTML fragment に export します。preview 中に Babel source block は実行しません。
-- remote URL、=.el=、=.html=、=.pdf= などはローカルリンク遷移の対象外です。
-
-* FAQ
-
-- *Emacs 内プレビューでテキストをコピーするには?* :: xwidget プレビューバッファ内でブラウザと同様にテキストを選択し、=M-w=（macOS では =s-c=）を押してください。プレビューバッファの =doclive-xwidget-preview-mode= がこのキーを =doclive-xwidget-copy-selection= にリマップしており、選択範囲を kill ring に入れるので =C-y= で Emacs 側に貼り付けられます。
-- *大きな Mermaid 図が読みにくい* :: 図の Fit または 100% 操作でその場のサイズを調整するか、Expand で全画面オーバーレイを開いてマウスホイールでのズームとドラッグでのパンを使ってください。オーバーレイは閉じるボタン、背景クリック、または外部ブラウザでは Escape で閉じます。xwidget プレビュー内では =xwidget-webkit-edit-mode= を有効にしない限りキー入力はページではなく Emacs 側に渡るため、閉じるボタンか背景クリックを使ってください。
+- *プレビューが Emacs 内ではなく外部ブラウザで開く* :: その Emacs は xwidget WebKit なしでビルドされているため、doclive は =browse-url= にフォールバックしました。Emacs 内プレビューを使うには =--with-xwidgets=（と WebKitGTK / WebKit バックエンド）付きで Emacs をビルドしてください。
+- *図、数式、シンタックスハイライトが描画されない* :: Mermaid、KaTeX、highlight.js はブラウザ側で外部 CDN から読み込みます。ブラウザ console と network log を確認してください。オフラインやプロキシ環境では =doclive-preview-asset-urls= を自前のミラー、ローカル配信先、またはプロキシに向けてください。
+- *サーバーが bind に失敗する* :: エラーにポート番号が表示されます。=doclive-port= を空いているポートに変更してください。
+- *Org Babel、=(eval …)= マクロ、=#+INCLUDE:=、=#+SETUPFILE:= が動かない* :: Org preview は Emacs built-in の =org= / =ox-html= で HTML fragment に export し、これらの機能を拒否します。信頼できない文書を開いただけでコードが実行されたり、文書自身以外のローカルファイルが読まれたりしないためです。
+- *相対リンクが開かない* :: remote URL、=.el=、=.html=、=.pdf= はローカルリンク遷移の対象外です。クリック元ディレクトリの外にあるリンク先も既定では拒否されます。
+- *サーバーが起動しない* :: token 生成には =/dev/urandom= か =openssl= が必要です。どちらもない環境（=PATH= に openssl がない素の Windows など）では起動に失敗します。
+- *大きな Mermaid 図が読みにくい* :: 図の Fit または 100% 操作でその場のサイズを調整するか、Expand で全画面オーバーレイを開いてマウスホイールでのズームとドラッグでのパンを使ってください。オーバーレイは閉じるボタンか背景クリックで閉じます。外部ブラウザでは Escape でも閉じます。xwidget プレビュー内では =xwidget-webkit-edit-mode= を有効にしている場合だけ Escape がページに届きます。
 
 * Contributing
 

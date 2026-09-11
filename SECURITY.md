@@ -2,9 +2,9 @@
 
 ## Supported Versions
 
-Security fixes are applied to the current default branch before the next MELPA
-release.  Until the first stable release, only the latest unreleased development
-state is supported.
+Security fixes land on the default branch and ship in the next tagged release.
+Only the latest tagged release is supported; earlier releases receive no
+backports.
 
 ## Reporting a Vulnerability
 
