@@ -65,14 +65,29 @@ const assets = new Map([
   ["/assets/style.css", ""],
   [
     "/assets/marked.js",
-    `globalThis.marked={setOptions(){},parse(source){const escaped=source.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));return escaped.split(/\\n\\n+/).map((part,index)=>index===0&&part.startsWith('# ')?'<h1>'+part.slice(2)+'</h1>':'<p>'+part.replace(/\\n/g,'<br>')+'</p>').join('');}};`,
+    `globalThis.marked={setOptions(o){globalThis.markedOptions=o;},parse(source){` +
+      `const esc=(s)=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));` +
+      `const blocks=source.split(/\\n\\n+/);` +
+      `return blocks.map((part,index)=>{` +
+      `if(index===0&&part.startsWith('# ')) return '<h1>'+esc(part.slice(2))+'</h1>';` +
+      `const fence=part.match(/^\`\`\`(\\S*)\\n([\\s\\S]*?)\\n\`\`\`\\s*$/);` +
+      `if(fence){const cls=fence[1]==='mermaid'?' class="language-mermaid"':''; return '<pre><code'+cls+'>'+esc(fence[2])+'</code></pre>';}` +
+      `const firstLine=part.split('\\n')[0].trim();` +
+      `if(firstLine.startsWith('|')&&firstLine.endsWith('|')){` +
+      `const rows=part.split('\\n').filter((line)=>line.trim().startsWith('|'));` +
+      `const body=rows.map((row)=>'<tr>'+row.split('|').slice(1,-1).map((cell)=>'<td>'+esc(cell.trim())+'</td>').join('')+'</tr>').join('');` +
+      `return '<table>'+body+'</table>';}` +
+      `const task=part.match(/^-\\s\\[ \\]\\s(.*)$/);` +
+      `if(task) return '<ul><li><input type="checkbox" disabled> '+esc(task[1])+'</li></ul>';` +
+      `return '<p>'+esc(part).replace(/\\n/g,'<br>')+'</p>';` +
+      `}).join('');}};`,
   ],
   ["/assets/highlight.js", "globalThis.hljs={highlightElement(){}};"],
   ["/assets/katex.js", "globalThis.katex={};"],
   ["/assets/katex-auto-render.js", "globalThis.renderMathInElement=()=>{};"],
   [
     "/assets/mermaid.js",
-    "globalThis.mermaid={initialize(){},async render(){return {svg:'<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>'};}};",
+    "globalThis.mermaid={initialize(){},async render(){return {svg:'<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 3000 200\" width=\"100%\" style=\"max-width:3000px;\"></svg>'};}};",
   ],
 ]);
 
@@ -89,7 +104,7 @@ const server = createServer((request, response) => {
       revision: 1,
       name: "browser-smoke.md",
       contentKind: "markdown",
-      markdown: "# Browser Smoke\n\nNeedle alpha and needle beta.",
+      markdown: "# Browser Smoke\n\nNeedle alpha and needle beta.\n\nThis line wraps\ninto a second line.\n\n| Col A | Col B |\n| --- | --- |\n| one | two |\n\n- [ ] Todo item\n\n```js\nconst greeting = 'hi';\n```\n\n```mermaid\ngraph TD; A-->B;\n```\n",
     }));
   } else if (url.pathname === "/events") {
     response.writeHead(200, {
@@ -230,8 +245,38 @@ try {
   await evaluate("document.querySelector('#zoom-reset').click()");
   assert(await evaluate("document.querySelector('#md').style.fontSize === '100%'"), "zoom reset did not restore content size");
 
+  assert(await evaluate("globalThis.markedOptions && globalThis.markedOptions.breaks === false"), "marked breaks option was not disabled");
+  assert(await evaluate("document.title === 'browser-smoke.md - doclive'"), "document title was not set from document name");
+  assert(await evaluate("!!document.querySelector('#md .table-wrap table')"), "table was not wrapped in .table-wrap");
+  assert(await evaluate("(()=>{const li=document.querySelector('#md li'); return !!li && getComputedStyle(li).listStyleType==='none';})()"), "task list item did not have list-style:none");
+
+  await waitFor("!!document.querySelector('.mermaid-holder svg')", "mermaid svg render");
+  assert(await evaluate("document.querySelector('.mermaid-holder svg').getBoundingClientRect().width > 1000"), "mermaid svg did not render at natural oversized width");
+  assert(await evaluate("(()=>{const h=document.querySelector('.mermaid-holder'); return h.scrollWidth>h.clientWidth;})()"), "mermaid holder was not horizontally scrollable");
+
+  await evaluate("document.querySelectorAll('.mermaid-tools button')[0].click();");
+  assert(await evaluate("(()=>{const h=document.querySelector('.mermaid-holder'); const svg=h.querySelector('svg'); return svg.getBoundingClientRect().width<=h.clientWidth;})()"), "Fit control did not shrink svg to holder width");
+
+  await evaluate("const expandBtn=document.querySelectorAll('.mermaid-tools button')[2]; expandBtn.focus(); expandBtn.click();");
+  assert(await evaluate("(()=>{const o=document.getElementById('mermaid-overlay'); return !!o && !!o.querySelector('svg') && getComputedStyle(o).display!=='none';})()"), "Expand control did not open a visible mermaid overlay");
+  assert(await evaluate("(()=>{const h=document.querySelector('.mermaid-holder'); const overlaySvg=document.querySelector('#mermaid-overlay svg'); return overlaySvg.getBoundingClientRect().width>h.clientWidth;})()"), "Expand overlay did not show the diagram at natural size after Fit");
+  assert(await evaluate("document.querySelector('#mermaid-overlay svg').style.width===''"), "Expand overlay svg retained an inline width from Fit");
+  assert(await evaluate("document.activeElement===document.querySelector('.mermaid-overlay-close')"), "focus did not move to the overlay close button on open");
+
+  await evaluate("document.querySelector('.mermaid-overlay-close').click();");
+  assert(await evaluate("!document.getElementById('mermaid-overlay')"), "close button did not remove the mermaid overlay");
+  assert(await evaluate("document.activeElement===document.querySelectorAll('.mermaid-tools button')[2]"), "focus did not return to the Expand button after close");
+
+  await evaluate("window.docliveSetSearch('needle');");
+  assert(await evaluate("document.querySelectorAll('#md mark').length >= 2"), "docliveSetSearch did not highlight matches");
+
+  await evaluate("Object.defineProperty(navigator,'clipboard',{value:undefined,configurable:true}); document.execCommand=(cmd)=>{globalThis.execCalls=(globalThis.execCalls||[]).concat(cmd); return cmd==='copy';};");
+  await evaluate("document.querySelector('.copy-btn').click();");
+  await waitFor("document.querySelector('.copy-btn').textContent==='Copied'", "copy button fallback result");
+  assert(await evaluate("Array.isArray(globalThis.execCalls) && globalThis.execCalls.includes('copy')"), "copy fallback did not invoke execCommand('copy')");
+
   assert(browserErrors.length === 0, `browser console errors:\n${browserErrors.join("\n")}`);
-  process.stdout.write("browser smoke passed: render, status, search/pin, theme, zoom\n");
+  process.stdout.write("browser smoke passed: render, status, search/pin, theme, zoom, marked options, title, table wrap, task list, mermaid overlay/fit/expand/close/focus, docliveSetSearch, copy fallback\n");
 } finally {
   socket.close();
   for (const stream of openStreams) stream.end();

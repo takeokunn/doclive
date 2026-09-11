@@ -1,5 +1,47 @@
 #+TITLE: doclive NEWS - user-visible changes
 
+* 1.3.0 (2026-09-11)
+
+  - The in-Emacs xwidget preview now opens in another window via
+    ~display-buffer~, controlled by the new
+    ~doclive-xwidget-display-buffer-action~ (default: to the right of the
+    document window).
+  - Re-running ~doclive-preview-buffer~ on the same buffer reuses its
+    existing preview buffer instead of opening another xwidget session;
+    restarting the server (~C-u~ prefix or ~doclive-stop-server~) points the
+    reused preview at a fresh bootstrap URL.
+  - The xwidget preview buffer is renamed from the page title, which the
+    server now sets to "<document buffer name> - doclive" when it serves
+    the page, so multiple previews stay distinguishable.  The name is set
+    at first load and does not follow later in-page link navigation to a
+    different document.
+  - Preview buffers enable a buffer-local ~doclive-xwidget-preview-mode~
+    that remaps copy (~M-w~, and ~s-c~ on macOS) to
+    ~doclive-xwidget-copy-selection~ and yank (~C-y~, ~s-v~) to
+    ~doclive-xwidget-yank-to-search~, so your usual copy/paste keys copy
+    selected preview text to the kill ring and search the preview page.
+  - Killing the previewed document buffer, or disabling
+    ~doclive-preview-mode~ in it, now also closes the xwidget preview buffer
+    it opened; ~doclive-stop-server~ still leaves preview buffers open.
+  - The code-block Copy button now falls back to a selection-based copy when
+    the asynchronous clipboard API is unavailable, so it also works inside
+    the xwidget preview.
+  - A single newline inside a paragraph no longer forces a line break,
+    matching how GitHub renders Markdown files; two trailing spaces or a
+    trailing backslash still force one.
+  - The reading column widened from 840px to 1080px; wide tables scroll
+    horizontally instead of overflowing, inline code inside table cells no
+    longer wraps mid-token, task-list items no longer show a bullet beside
+    their checkbox, and table headers keep their original case.
+  - Mermaid diagrams render at natural size inside a scrollable frame capped
+    at 70% of the viewport height, with per-diagram Fit / 100% / Expand
+    controls; Expand opens a full-viewport overlay with mouse-wheel zoom and
+    drag panning, closed by its close button, a click on the backdrop, or
+    Escape in an external browser.  Inside the xwidget preview, key presses
+    go to Emacs rather than the page unless ~xwidget-webkit-edit-mode~ is
+    enabled, so use the close button or backdrop there.  Mermaid's theme now
+    follows the page's dark/light theme.
+
 * 1.2.0 (2026-07-26)
 
   - Unchanged Org buffers reuse their exported preview content, avoiding

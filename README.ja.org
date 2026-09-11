@@ -15,9 +15,12 @@ AI が生成した Mermaid 図や LaTeX 数式（equation, align, gather, cases 
 * Features
 
 - SSE によるライブ更新（150ms デバウンス付き）
-- xwidget WebKit による Emacs 内プレビュー（未対応 Emacs では外部ブラウザへフォールバック）
-- Markdown と Org のプレビュー表示
-- Mermaid 図（バッククォート・チルダフェンス、mmd エイリアス対応）
+- xwidget WebKit による Emacs 内プレビュー。文書バッファの隣に別ウィンドウで開き（配置は変更可能）、
+  同じバッファへの再プレビューでは既存のプレビューバッファを使い回します（未対応 Emacs では外部ブラウザへフォールバック）
+- プレビューバッファ内で通常のコピー/ペーストキーを使い、選択テキストのコピーやページ内検索ができます
+- Markdown と Org のプレビュー表示。段落内の単独改行は GitHub の =.md= 表示と同様に改行として扱いません
+- Mermaid 図（バッククォート・チルダフェンス、mmd エイリアス対応）。原寸大でスクロール可能な枠内に表示し、
+  Fit / 100% / Expand の操作と全画面表示でのズーム・パンに対応します
 - KaTeX 数式（equation, align, gather, cases など LaTeX 環境を網羅的にサポート）
 - Highlight.js によるシンタックスハイライト
 - Markdown / Org のローカル相対リンク遷移 + 戻る/進む
@@ -26,7 +29,7 @@ AI が生成した Mermaid 図や LaTeX 数式（equation, align, gather, cases 
 - 検索 + ピン留めハイライト
 - テーマ切替（Dark / Light）+ コネクション状態表示
 - ズーム
-- バッファ削除時の自動クリーンアップ
+- バッファ削除時の自動クリーンアップ（開いた xwidget プレビューバッファも含む）
 - Emacs 終了時のサーバー自動停止
 
 * Installation
@@ -118,6 +121,7 @@ M-x doclive-reload-page
 - =doclive-host= : bind host
 - =doclive-port= : bind port
 - =doclive-open-browser-function= : URL オープン関数（既定は xwidget 優先）
+- =doclive-xwidget-display-buffer-action= : xwidget プレビューウィンドウを配置する =display-buffer= アクション（既定は文書ウィンドウの右側）
 - =doclive-change-debounce-ms= : 変更検知のデバウンス間隔（ms、既定 150）
 - =doclive-preview-asset-urls= : ブラウザ側で読む marked.js / KaTeX / Mermaid / highlight.js の資源 URL
 - =doclive-allow-linked-document-parent-directory= : ローカルリンク遷移でクリック元ディレクトリ外の Markdown / Org を開くかどうか（既定 nil）
@@ -203,6 +207,11 @@ make smoke
 - port conflict がある場合は =doclive-port= を別の値に変更してください。
 - Org preview は Emacs built-in の =org= / =ox-html= で HTML fragment に export します。preview 中に Babel source block は実行しません。
 - remote URL、=.el=、=.html=、=.pdf= などはローカルリンク遷移の対象外です。
+
+* FAQ
+
+- *Emacs 内プレビューでテキストをコピーするには?* :: xwidget プレビューバッファ内でブラウザと同様にテキストを選択し、=M-w=（macOS では =s-c=）を押してください。プレビューバッファの =doclive-xwidget-preview-mode= がこのキーを =doclive-xwidget-copy-selection= にリマップしており、選択範囲を kill ring に入れるので =C-y= で Emacs 側に貼り付けられます。
+- *大きな Mermaid 図が読みにくい* :: 図の Fit または 100% 操作でその場のサイズを調整するか、Expand で全画面オーバーレイを開いてマウスホイールでのズームとドラッグでのパンを使ってください。オーバーレイは閉じるボタン、背景クリック、または外部ブラウザでは Escape で閉じます。xwidget プレビュー内では =xwidget-webkit-edit-mode= を有効にしない限りキー入力はページではなく Emacs 側に渡るため、閉じるボタンか背景クリックを使ってください。
 
 * Contributing
 
