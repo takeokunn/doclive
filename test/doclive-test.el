@@ -4,7 +4,7 @@
 
 ;;; Commentary:
 
-;; Comprehensive test suite for doclive covering:
+;; Test suite for doclive covering:
 ;; - Buffer identity and state tracking
 ;; - Markdown / Org JSON schema
 ;; - Org export safety and Babel non-execution
@@ -352,7 +352,7 @@
            (kill-buffer buf)))))))
 
 (ert-deftest doclive-test-open-linked-org ()
-  "Markdown links to Org documents should open successfully."
+  "Markdown links to Org documents should open."
   (doclive-test--with-temp-linked-files
    '(("source.md" . "# Source\n\n[org](target.org#Heading)\n")
      ("target.org" . "#+TITLE: Target\n\n* Heading\n"))
@@ -369,7 +369,7 @@
            (kill-buffer buf)))))))
 
 (ert-deftest doclive-test-open-linked-markdown-from-org ()
-  "Org links to Markdown documents should open successfully."
+  "Org links to Markdown documents should open."
   (doclive-test--with-temp-linked-files
    '(("source.org" . "#+TITLE: Source\n\n[[file:target.md][Markdown]]\n")
      ("target.md" . "# Target\n"))
@@ -386,7 +386,7 @@
            (kill-buffer buf)))))))
 
 (ert-deftest doclive-test-open-linked-org-from-org ()
-  "Org links to Org documents should open successfully."
+  "Org links to Org documents should open."
   (doclive-test--with-temp-linked-files
    '(("source.org" . "#+TITLE: Source\n\n[[file:target.org][Org]]\n")
      ("target.org" . "#+TITLE: Target\n\n* Target\n"))

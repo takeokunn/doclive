@@ -47,7 +47,7 @@
 ;; - SSE-based live update with debounced change tracking (150 ms)
 ;; - Mermaid diagrams (backtick and tilde fences, mmd alias), with
 ;;   Fit / 100% / Expand controls and a zoom/pan overlay
-;; - KaTeX math with comprehensive LaTeX environments
+;; - KaTeX math, including LaTeX environments
 ;;   (equation, align, gather, cases, etc.)
 ;; - Syntax highlighting via highlight.js
 ;; - TOC sidebar and code-copy buttons
@@ -1152,8 +1152,8 @@ SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
 (defun doclive--preview-html (&optional script-nonce title)
   "Return the complete self-contained preview HTML page.
 The page embeds marked.js for Markdown rendering, highlight.js for
-syntax highlighting, KaTeX for math typesetting with comprehensive
-LaTeX environment support, Mermaid.js for diagram rendering, and an
+syntax highlighting, KaTeX for math typesetting including LaTeX
+environments, Mermaid.js for diagram rendering, and an
 SSE client for live-update support.  SCRIPT-NONCE is applied to inline
 runtime script and style when it is safe for CSP nonce use.  TITLE,
 when non-nil, names the previewed buffer in the page's <title>."

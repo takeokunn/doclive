@@ -13,9 +13,10 @@ Use this recipe in the MELPA repository:
 - Confirm the package is released under GPL-3.0-or-later.
 - Confirm =doclive.el= has lexical binding, package metadata, commentary, and autoloads.
 - Run =make check= and confirm the canonical local release gate passes. This covers
-  byte-compilation, ERT, checkdoc, package-lint, autoload generation, secret
-  scanning, actionlint, zizmor, and the daemon HTTP smoke test.
-- Run =git diff --check= and confirm no whitespace errors.
+  byte-compilation, ERT, checkdoc, package-lint, autoload generation, a syntax
+  check of the embedded preview JavaScript, a headless Chromium smoke test of
+  the preview page, secret scanning, actionlint, zizmor, the daemon HTTP smoke
+  test, and =git diff --check= for whitespace errors.
 - Build and install the package following MELPA's current CONTRIBUTING instructions.
 
 * Manual Smoke Test
@@ -36,7 +37,8 @@ Confirm:
 
 - preview opens in xwidget WebKit or external browser fallback
 - edits to the source buffer update the preview
-- local =.md= / =.org= links stay within the documented security boundary
+- the =sample.org= link in =example/sample.md= opens in the same preview,
+  and a =../= link to a file outside =example/= is refused
 - =M-x doclive-stop-server= stops the local preview server
 
 * Submission Notes

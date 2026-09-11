@@ -13,11 +13,10 @@ doclive is a live-preview Emacs package that renders Markdown and Org
 documents in an xwidget WebKit buffer inside Emacs (or an external
 browser as a fallback).  Edits are pushed to the preview in real time
 over Server-Sent Events, so the rendered page stays in sync while you
-type — no manual refresh.
+type, with no manual refresh.
 
 It is built for reviewing AI-generated documents: Mermaid diagrams and
-LaTeX math (=equation=, =align=, =gather=, =cases=, and more) render
-comprehensively out of the box.
+LaTeX math environments render without extra setup.
 
 [[file:docs/images/preview-dark.png]]
 
@@ -35,12 +34,13 @@ Light theme:
 - Copy selected preview text and search the preview page using your
   usual copy/paste keys, from inside the xwidget preview buffer
 - Markdown and Org rendering (Org exports through built-in =ox-html=,
-  never executing Babel blocks); single newlines inside a paragraph no
-  longer break the line, matching GitHub's rendering of =.md= files
+  never executing Babel blocks); a single newline inside a paragraph
+  does not break the line, matching GitHub's rendering of =.md= files
 - Mermaid diagrams (backtick and tilde fences, =mmd= alias) at natural
   size in a scrollable frame with Fit / 100% / Expand controls and a
   full-viewport zoom-and-pan overlay
-- KaTeX math with comprehensive LaTeX environment support
+- KaTeX math, including LaTeX environments such as =equation=, =align=,
+  =gather=, =cases=, =Bmatrix=, and =vmatrix=
 - Syntax highlighting via highlight.js
 - Local relative-link navigation between =.md= / =.org= files with
   back/forward history
@@ -89,16 +89,9 @@ Once doclive is available on MELPA:
 | =doclive-reload-page=     | Force-push the latest snapshot to the preview            |
 | =doclive-stop-server=     | Stop the local preview server                            |
 
-** Previewing the current buffer
-
-In a Markdown or Org buffer:
-
-#+begin_example
-M-x doclive-preview-buffer
-#+end_example
-
-Use =C-u M-x doclive-preview-buffer= to restart the server before
-opening the preview.
+=doclive-preview-buffer= treats a buffer as Org when its major mode
+derives from =org-mode= or its file name ends in =.org=, and as Markdown
+otherwise.
 
 ** Keybindings
 
@@ -110,9 +103,6 @@ your keymaps.  Bind the commands you use to keys you prefer, for example:
   (define-key markdown-mode-map (kbd "C-c C-v") #'doclive-preview-buffer)
   (define-key org-mode-map      (kbd "C-c C-v") #'doclive-preview-buffer))
 #+end_src
-
-The preview page itself has in-page controls (search, pin, theme, zoom,
-back/forward) that need no Emacs bindings.
 
 *** Preview buffer keys
 
@@ -130,8 +120,8 @@ of the empty xwidget buffer:
   which puts the head of the kill ring into the preview page's "Find
   in page" box and applies the highlight.
 
-Document buffers keep no default keybindings from doclive; only the
-preview buffers it creates get these remaps.
+Every other key press in the preview buffer goes to Emacs, not to the
+page, unless Emacs's own =xwidget-webkit-edit-mode= is enabled.
 
 ** Local link navigation
 
@@ -140,8 +130,8 @@ opens the target in the same doclive page.  Fragments and query strings
 are ignored during file resolution; remote URLs and unsupported
 extensions never open.  By default, link targets are confined to the
 directory of the clicking document (checked against symlink-resolved
-real paths).  To allow links that escape to parent directories — for
-example =../notes.md= — enable
+real paths).  To allow links that escape to parent directories (for
+example =../notes.md=), enable
 =doclive-allow-linked-document-parent-directory= for trusted documents
 only.
 
@@ -167,8 +157,8 @@ reused after a restart.
 | =doclive-host=                                    | =127.0.0.1=   | Bind host                                                      |
 | =doclive-allow-non-loopback-host=                 | =nil=         | Allow binding to non-loopback hosts                            |
 | =doclive-port=                                    | =39123=       | Bind port                                                      |
-| =doclive-open-browser-function=                   | xwidget-first | Function used to open the preview URL                          |
-| =doclive-xwidget-display-buffer-action=           | right of doc  | =display-buffer= action placing the xwidget preview window      |
+| =doclive-open-browser-function=                   | =doclive-open-url= | Function used to open the preview URL; the default uses xwidget when available, else =browse-url= |
+| =doclive-xwidget-display-buffer-action=           | =(display-buffer-in-direction (direction . right))= | =display-buffer= action placing the xwidget preview window |
 | =doclive-change-debounce-ms=                      | =150=         | Debounce interval for change detection (ms)                    |
 | =doclive-preview-asset-urls=                      | pinned CDN    | marked.js / KaTeX / Mermaid / highlight.js asset URLs          |
 | =doclive-allow-linked-document-parent-directory=  | =nil=         | Allow linked-document navigation outside the source directory  |
@@ -189,8 +179,8 @@ doclive starts a local HTTP server bound to =127.0.0.1= by default.
   by the cookie, never by query tokens.  Requests carrying a =token=
   query parameter are rejected even with a valid cookie.
 - Buffer IDs appearing in URLs, SSE streams, and JSON payloads are
-  opaque per-buffer random routing identifiers — not authorization
-  secrets, and never derived from file paths or buffer names.
+  opaque per-buffer random routing identifiers.  They are not authorization
+  secrets and are never derived from file paths or buffer names.
 - Stopping the server discards the session token and unused bootstrap
   codes; a fresh token is generated on the next start.  Disabling
   =doclive-preview-mode= in a buffer removes its preview entry, SSE
@@ -209,7 +199,14 @@ doclive starts a local HTTP server bound to =127.0.0.1= by default.
   documents out of that allowance, the sanitizer removes =style=
   elements and =style= attributes from document-derived HTML before DOM
   insertion; trusted Mermaid SVG output (generated with
-  =securityLevel: strict=) keeps its own styles.
+  =securityLevel: strict=) keeps its own styles.  That SVG comes from
+  Mermaid's renderer, not from the document: at =strict=, Mermaid
+  encodes HTML in diagram labels and disables click directives, so
+  diagram source cannot inject markup or handlers.
+- The server serves no files from disk.  Its only routes are the
+  preview page, =/content=, =/open=, and =/events=, so the only local
+  files a document can reach are the =.md= / =.org= targets of relative
+  links, confined as described under Local link navigation.
 
 Binding to a non-loopback host makes the server reachable from other
 browsers on the same network.  Change =doclive-host= only when needed,
@@ -234,8 +231,8 @@ Linked-document navigation is confined to the clicking document's
 directory by default, checked after symlink resolution, so a link name
 inside the directory that points at an outside file will not open.
 
-See [[file:SECURITY.md][SECURITY.md]] for the reporting process and the full boundary
-description.
+See [[file:SECURITY.md][SECURITY.md]] for the reporting process and the list of boundaries
+whose bypass counts as a security bug.
 
 * Comparison with alternatives
 
@@ -256,11 +253,14 @@ The canonical local gate:
 make check
 #+end_src
 
-=make check= runs compile, test, lint, package-lint, autoloads,
-security (secret scan, GitHub Actions lint, workflow security scan),
-and the daemon smoke test.  Use =nix develop= to get all CLI tools, or
-run the same gates through =nix flake check= / =pre-commit run
---all-files=.
+=make check= runs compile, test, lint, package-lint, autoloads, a
+syntax check of the embedded preview JavaScript, a headless Chromium
+smoke test of the preview page, security (secret scan, GitHub Actions
+lint, workflow security scan), the daemon smoke test, and =git diff
+--check=.  The browser smoke test needs a Chromium or Google Chrome
+binary; set =CHROMIUM_BIN= when none is on =PATH=.  Use =nix develop=
+to get all CLI tools, or run the same gates through =nix flake check= /
+=pre-commit run --all-files=.
 
 The daemon smoke test uses =example/sample.md= and =example/sample.org=
 to exercise daemon startup, first bootstrap, cookie authorization,
@@ -293,55 +293,34 @@ cross-environment performance ranking.
 
 * Troubleshooting
 
-- Mermaid / KaTeX / highlight.js load from external CDNs in the
-  browser.  If rendering fails, check the browser console and network
-  log.
-- In network-restricted environments, point
-  =doclive-preview-asset-urls= at your own mirror or a local origin.
-- On a port conflict, change =doclive-port=.
-- Org preview exports through built-in =org= / =ox-html= as an HTML
-  fragment.  Babel source blocks are never executed during preview, and
-  =#+INCLUDE:= / =#+SETUPFILE:= directives are intentionally not
-  resolved so that untrusted documents cannot pull additional local
-  files into the preview.
-- Remote URLs and =.el= / =.html= / =.pdf= files are not valid
-  linked-document navigation targets.
-- Secure token generation requires =/dev/urandom= or an =openssl=
-  binary; on platforms with neither (for example stock Windows without
-  openssl on =PATH=), the server refuses to start.
-
-* FAQ
-
 - *The preview opens an external browser instead of showing inside
-  Emacs.* :: Your Emacs was built without xwidget WebKit support.
-  doclive falls back to =browse-url= automatically.  Rebuild Emacs
-  =--with-xwidgets= (and a WebKitGTK / WebKit backend) for the in-Emacs
-  preview.
-- *Diagrams or math do not render.* :: Mermaid, KaTeX, and highlight.js
-  load from CDNs in the browser.  On an offline or proxied network,
-  point =doclive-preview-asset-urls= at a local mirror or your proxy.
-- *Port 39123 is already in use.* :: Set =doclive-port= to a free port.
-  A bind failure now reports the port and remedy instead of a raw error.
-- *Why is Org Babel disabled, and =#+INCLUDE:= rejected?* :: doclive
-  renders untrusted, possibly AI-generated documents.  Babel execution,
-  Org =(eval …)= macros, =#+INCLUDE:=, and =#+SETUPFILE:= are refused so
-  that opening a document cannot run code or read arbitrary local files.
-- *Can I share a preview URL with a colleague?* :: No.  Preview URLs are
-  loopback-only by default and the first URL carries a single-use
-  bootstrap code.  See the Security model section.
-- *How do I copy text out of the in-Emacs preview?* :: Select the text
-  in the xwidget preview buffer as you would in any browser, then
-  press =M-w= (or =s-c= on macOS).  The preview buffer's
-  =doclive-xwidget-preview-mode= remaps that key to
-  =doclive-xwidget-copy-selection=, which puts the selection in the
-  kill ring so =C-y= yanks it elsewhere in Emacs.
+  Emacs.* :: Your Emacs was built without xwidget WebKit support, so
+  doclive fell back to =browse-url=.  Rebuild Emacs =--with-xwidgets=
+  (and a WebKitGTK / WebKit backend) for the in-Emacs preview.
+- *Diagrams, math, or highlighting do not render.* :: Mermaid, KaTeX,
+  and highlight.js load from external CDNs in the browser; check the
+  browser console and network log.  On an offline or proxied network,
+  point =doclive-preview-asset-urls= at your own mirror, a local
+  origin, or your proxy.
+- *The server fails to bind.* :: The error names the port; set
+  =doclive-port= to a free one.
+- *Org Babel, =(eval …)= macros, =#+INCLUDE:=, or =#+SETUPFILE:= do
+  nothing.* :: Org preview exports through built-in =org= / =ox-html=
+  as an HTML fragment with those features refused, so that opening an
+  untrusted document cannot run code or read local files beyond the
+  document itself.
+- *A relative link does not open.* :: Remote URLs and =.el= / =.html= /
+  =.pdf= files are not linked-document targets, and targets outside the
+  clicking document's directory are refused by default.
+- *The server refuses to start.* :: Token generation requires
+  =/dev/urandom= or an =openssl= binary; on platforms with neither (for
+  example stock Windows without openssl on =PATH=), startup fails.
 - *A large Mermaid diagram is unreadable.* :: Use the diagram's Fit or
   100% control to resize it in place, or Expand for a full-viewport
   overlay with mouse-wheel zoom and drag panning.  Close the overlay
-  with its close button, a click on the backdrop, or Escape in an
-  external browser.  Inside the xwidget preview, key presses go to
-  Emacs rather than the page unless =xwidget-webkit-edit-mode= is
-  enabled, so use the close button or click the backdrop there.
+  with its close button or a click on the backdrop.  In an external
+  browser, Escape also closes it; inside the xwidget preview, Escape
+  reaches the page only under =xwidget-webkit-edit-mode=.
 
 * Contributing
 
