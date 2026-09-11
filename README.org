@@ -28,18 +28,27 @@ Light theme:
 * Features
 
 - Live updates over SSE with a 150 ms debounce
-- In-Emacs preview via xwidget WebKit, falling back to an external
-  browser on Emacs builds without xwidget support
+- In-Emacs preview via xwidget WebKit, opened in another window next
+  to the document (configurable placement) and reused on repeat
+  previews of the same buffer, falling back to an external browser on
+  Emacs builds without xwidget support
+- Copy selected preview text and search the preview page using your
+  usual copy/paste keys, from inside the xwidget preview buffer
 - Markdown and Org rendering (Org exports through built-in =ox-html=,
-  never executing Babel blocks)
-- Mermaid diagrams (backtick and tilde fences, =mmd= alias)
+  never executing Babel blocks); single newlines inside a paragraph no
+  longer break the line, matching GitHub's rendering of =.md= files
+- Mermaid diagrams (backtick and tilde fences, =mmd= alias) at natural
+  size in a scrollable frame with Fit / 100% / Expand controls and a
+  full-viewport zoom-and-pan overlay
 - KaTeX math with comprehensive LaTeX environment support
 - Syntax highlighting via highlight.js
 - Local relative-link navigation between =.md= / =.org= files with
   back/forward history
 - TOC sidebar, code-copy buttons, full-text search with pinned
   highlights, dark/light theme toggle, zoom, connection indicator
-- Automatic cleanup on buffer kill and Emacs shutdown
+- Automatic cleanup on buffer kill and Emacs shutdown; killing a
+  previewed document buffer, or disabling =doclive-preview-mode= in
+  it, also closes the xwidget preview buffer it opened
 
 * Installation
 
@@ -105,6 +114,25 @@ your keymaps.  Bind the commands you use to keys you prefer, for example:
 The preview page itself has in-page controls (search, pin, theme, zoom,
 back/forward) that need no Emacs bindings.
 
+*** Preview buffer keys
+
+Each xwidget preview buffer doclive opens enables a buffer-local minor
+mode, =doclive-xwidget-preview-mode=, that binds nothing on its own
+keys.  The buffer is renamed from the previewed page's title, so its
+name carries the document name.  The minor mode only remaps your
+existing copy and yank keys so they act on the previewed page instead
+of the empty xwidget buffer:
+
+- =kill-ring-save= (=M-w=), and =ns-copy-including-secondary= (=s-c=)
+  on macOS, remap to =doclive-xwidget-copy-selection=, which copies
+  the text currently selected in the preview page to the kill ring.
+- =yank= (=C-y=, =s-v=) remaps to =doclive-xwidget-yank-to-search=,
+  which puts the head of the kill ring into the preview page's "Find
+  in page" box and applies the highlight.
+
+Document buffers keep no default keybindings from doclive; only the
+preview buffers it creates get these remaps.
+
 ** Local link navigation
 
 Clicking a relative link to a =.md= / =.org= file inside the preview
@@ -140,6 +168,7 @@ reused after a restart.
 | =doclive-allow-non-loopback-host=                 | =nil=         | Allow binding to non-loopback hosts                            |
 | =doclive-port=                                    | =39123=       | Bind port                                                      |
 | =doclive-open-browser-function=                   | xwidget-first | Function used to open the preview URL                          |
+| =doclive-xwidget-display-buffer-action=           | right of doc  | =display-buffer= action placing the xwidget preview window      |
 | =doclive-change-debounce-ms=                      | =150=         | Debounce interval for change detection (ms)                    |
 | =doclive-preview-asset-urls=                      | pinned CDN    | marked.js / KaTeX / Mermaid / highlight.js asset URLs          |
 | =doclive-allow-linked-document-parent-directory=  | =nil=         | Allow linked-document navigation outside the source directory  |
@@ -300,6 +329,19 @@ cross-environment performance ranking.
 - *Can I share a preview URL with a colleague?* :: No.  Preview URLs are
   loopback-only by default and the first URL carries a single-use
   bootstrap code.  See the Security model section.
+- *How do I copy text out of the in-Emacs preview?* :: Select the text
+  in the xwidget preview buffer as you would in any browser, then
+  press =M-w= (or =s-c= on macOS).  The preview buffer's
+  =doclive-xwidget-preview-mode= remaps that key to
+  =doclive-xwidget-copy-selection=, which puts the selection in the
+  kill ring so =C-y= yanks it elsewhere in Emacs.
+- *A large Mermaid diagram is unreadable.* :: Use the diagram's Fit or
+  100% control to resize it in place, or Expand for a full-viewport
+  overlay with mouse-wheel zoom and drag panning.  Close the overlay
+  with its close button, a click on the backdrop, or Escape in an
+  external browser.  Inside the xwidget preview, key presses go to
+  Emacs rather than the page unless =xwidget-webkit-edit-mode= is
+  enabled, so use the close button or click the backdrop there.
 
 * Contributing
 

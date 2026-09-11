@@ -615,6 +615,35 @@
       (doclive-open-url "http://127.0.0.1:39123/preview?id=abc"))
     (should (equal opened "http://127.0.0.1:39123/preview?id=abc"))))
 
+(ert-deftest doclive-test-preview-html-title-defaults-to-doclive ()
+  "Preview HTML should title the page \"doclive\" when no buffer name is given."
+  (let ((html (doclive--preview-html)))
+    (should (string-match-p (regexp-quote "<title>doclive</title>") html))))
+
+(ert-deftest doclive-test-preview-html-title-includes-escaped-buffer-name ()
+  "Preview HTML should title the page with the escaped buffer name when given."
+  (let ((html (doclive--preview-html nil "a<b>.md")))
+    (should (string-match-p (regexp-quote "<title>a&lt;b&gt;.md - doclive</title>") html))))
+
+(ert-deftest doclive-test-send-preview-titles-page-with-entry-name ()
+  "Sending the preview page should title it with the previewed buffer's name."
+  (let* ((doc-buf (generate-new-buffer "doclive-test-title-buf.md"))
+         (id (doclive--buffer-id doc-buf))
+         (sent nil))
+    (unwind-protect
+        (progn
+          (doclive--ensure-entry doc-buf)
+          (cl-letf (((symbol-function 'process-send-string)
+                     (lambda (_proc string) (push string sent)))
+                    ((symbol-function 'delete-process) (lambda (_proc) nil)))
+            (doclive--send-preview 'fake-proc (format "/preview?id=%s" (url-hexify-string id))))
+          (should (string-match-p
+                   (regexp-quote
+                    (format "<title>%s - doclive</title>" (doclive--escape-html (buffer-name doc-buf))))
+                   (mapconcat #'identity sent ""))))
+      (doclive--remove-entry id)
+      (when (buffer-live-p doc-buf) (kill-buffer doc-buf)))))
+
 (ert-deftest doclive-test-preview-html-includes-core-hooks ()
   "Preview HTML should contain core runtime hooks."
   (let ((html (doclive--preview-html)))
@@ -811,7 +840,7 @@
     (should (string-match-p "function highlightCodeBlocks" html))
     (should (string-match-p "hljs.highlightElement(code)" html))
     (should (string-match-p
-             (regexp-quote "marked.setOptions({gfm:true,breaks:true});")
+             (regexp-quote "marked.setOptions({gfm:true,breaks:false});")
              html))
     (should-not (string-match-p "highlight:(code,lang)" html))))
 
@@ -2782,5 +2811,321 @@ never inline scripts."
                               (doclive--query-key-present-p path "token"))
                             nil)
                         (error 'signaled)))))))
+
+;; Preview page UX additions
+
+(ert-deftest doclive-test-preview-html-disables-marked-line-breaks ()
+  "Marked should not convert single newlines into <br> tags."
+  (let ((html (doclive--preview-html)))
+    (should (string-match-p (regexp-quote "marked.setOptions({gfm:true,breaks:false});") html))))
+
+(ert-deftest doclive-test-preview-html-widens-content-column ()
+  "Content column should use the widened max width."
+  (let ((html (doclive--preview-html)))
+    (should (string-match-p (regexp-quote ".md{max-width:1080px;") html))))
+
+(ert-deftest doclive-test-preview-html-drops-uppercase-table-headers ()
+  "Table header cells should not be forced to uppercase."
+  (let ((html (doclive--preview-html)))
+    (should (string-match-p (regexp-quote ".md th{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:left;}") html))
+    (should-not (string-match-p (regexp-quote ".md th{font-family:var(--mono);font-size:11px;letter-spacing") html))))
+
+(ert-deftest doclive-test-preview-html-wraps-tables-for-horizontal-scroll ()
+  "Preview should wrap tables so wide tables scroll instead of overflowing."
+  (let ((html (doclive--preview-html)))
+    (should (string-match-p (regexp-quote ".table-wrap{overflow-x:auto;margin:1.2em 0}") html))
+    (should (string-match-p (regexp-quote "function wrapTables(){") html))
+    (should (string-match-p (regexp-quote "buildToc(); wrapTables(); mdEl.setAttribute('data-base-html',mdEl.innerHTML);") html))))
+
+(ert-deftest doclive-test-preview-html-exposes-programmatic-search ()
+  "Preview should expose a window-level hook to drive the search field."
+  (let ((html (doclive--preview-html)))
+    (should (string-match-p
+             (regexp-quote "window.docliveSetSearch=function(text){searchEl.value=String(text==null?'':text); applyHighlights();};")
+             html))))
+
+(ert-deftest doclive-test-preview-html-sets-document-title-from-name ()
+  "Preview should reflect the active document name in the page title."
+  (let ((html (doclive--preview-html)))
+    (should (string-match-p
+             (regexp-quote "document.title=j.name?j.name+' - doclive':'doclive';")
+             html))))
+
+(ert-deftest doclive-test-preview-html-copy-button-falls-back-to-execcommand ()
+  "Copy button should fall back to execCommand when the clipboard API is unavailable or rejects."
+  (let ((html (doclive--preview-html)))
+    (should (string-match-p (regexp-quote "function fallbackCopyText(text){") html))
+    (should (string-match-p (regexp-quote "document.execCommand('copy')") html))
+    (should (string-match-p
+             (regexp-quote "if(navigator.clipboard&&navigator.clipboard.writeText){try{await navigator.clipboard.writeText(src.innerText); ok=true;}catch(e){ok=false;}} if(!ok){ok=fallbackCopyText(src.innerText);}")
+             html))))
+
+(ert-deftest doclive-test-preview-html-includes-mermaid-overlay-and-tools ()
+  "Preview should wire an expandable, pan/zoom mermaid overlay with fit controls."
+  (let ((html (doclive--preview-html)))
+    (should (string-match-p (regexp-quote "#mermaid-overlay{") html))
+    (should (string-match-p (regexp-quote "function wireMermaidTools(){") html))
+    (should (string-match-p (regexp-quote "function openMermaidOverlay(svg){") html))
+    (should (string-match-p (regexp-quote "function closeMermaidOverlay(){") html))
+    (should (string-match-p (regexp-quote "'aria-label','Close diagram'") html))
+    (should (string-match-p (regexp-quote "wireMermaidTools();") html))))
+
+;; Xwidget preview mode: copy/yank and lifecycle
+
+(ert-deftest doclive-test-xwidget-copy-selection-kills-nonempty-result ()
+  "Copying the preview selection should push a non-empty result onto the kill ring."
+  (let ((kill-ring nil)
+        recorded-script)
+    (cl-letf (((symbol-function 'xwidget-webkit-current-session) (lambda () 'fake-xwidget))
+              ((symbol-function 'xwidget-webkit-execute-script)
+               (lambda (_xwidget script callback)
+                 (setq recorded-script script)
+                 (funcall callback "hello"))))
+      (doclive-xwidget-copy-selection))
+    (should (equal (car kill-ring) "hello"))
+    (should (string-match-p "getSelection" recorded-script))))
+
+(ert-deftest doclive-test-xwidget-copy-selection-ignores-empty-result ()
+  "Copying an empty preview selection should leave the kill ring unchanged."
+  (let ((kill-ring nil))
+    (cl-letf (((symbol-function 'xwidget-webkit-current-session) (lambda () 'fake-xwidget))
+              ((symbol-function 'xwidget-webkit-execute-script)
+               (lambda (_xwidget _script callback) (funcall callback ""))))
+      (doclive-xwidget-copy-selection))
+    (should-not kill-ring)))
+
+(ert-deftest doclive-test-xwidget-yank-to-search-sends-json-escaped-script ()
+  "Yanking to search should JSON-escape the kill-ring text in the sent script."
+  (let ((kill-ring (list "a\"b\nc\\"))
+        recorded-script)
+    (cl-letf (((symbol-function 'xwidget-webkit-current-session) (lambda () 'fake-xwidget))
+              ((symbol-function 'xwidget-webkit-execute-script)
+               (lambda (_xwidget script &optional _callback) (setq recorded-script script))))
+      (doclive-xwidget-yank-to-search))
+    (should (string-prefix-p "window.docliveSetSearch(" recorded-script))
+    (should (string-search "\"a\\\"b\\nc\\\\\"" recorded-script))))
+
+(ert-deftest doclive-test-xwidget-yank-to-search-escapes-line-separators ()
+  "Yanking to search should escape raw U+2028/U+2029 that `json-encode-string' leaves unescaped."
+  (let ((kill-ring (list (concat "a" (string ? ) "b" (string ? ) "c")))
+        recorded-script)
+    (cl-letf (((symbol-function 'xwidget-webkit-current-session) (lambda () 'fake-xwidget))
+              ((symbol-function 'xwidget-webkit-execute-script)
+               (lambda (_xwidget script &optional _callback) (setq recorded-script script))))
+      (doclive-xwidget-yank-to-search))
+    (should (string-search "\\u2028" recorded-script))
+    (should (string-search "\\u2029" recorded-script))
+    (should-not (string-match-p (string ? ) recorded-script))
+    (should-not (string-match-p (string ? ) recorded-script))))
+
+(ert-deftest doclive-test-xwidget-open-preview-creates-and-reuses-buffer ()
+  "Opening a preview URL from a preview-mode buffer should create, then reuse, the xwidget buffer."
+  (let ((doc-buf (generate-new-buffer "doclive-test-xwidget-doc"))
+        (xwidget-buf nil)
+        (new-session-calls 0)
+        (goto-uri-calls 0)
+        (display-buffer-calls 0)
+        (display-buffer-action nil))
+    (unwind-protect
+        (progn
+          (with-current-buffer doc-buf
+            (cl-letf (((symbol-function 'doclive--snapshot-buffer) (lambda (&rest _) nil)))
+              (doclive-preview-mode 1)))
+          (cl-letf (((symbol-function 'doclive-xwidget-available-p) (lambda () t))
+                    ((symbol-function 'xwidget-webkit-new-session)
+                     (lambda (_url)
+                       (cl-incf new-session-calls)
+                       (setq xwidget-buf (generate-new-buffer "doclive-test-xwidget-page"))
+                       (switch-to-buffer xwidget-buf)))
+                    ((symbol-function 'display-buffer)
+                     (lambda (_buffer action)
+                       (cl-incf display-buffer-calls)
+                       (setq display-buffer-action action)
+                       (selected-window)))
+                    ((symbol-function 'get-buffer-xwidgets) (lambda (_buf) '(fake-xwidget)))
+                    ((symbol-function 'set-xwidget-query-on-exit-flag) (lambda (&rest _) nil))
+                    ((symbol-function 'xwidget-webkit-adjust-size-to-window) (lambda (&rest _) nil))
+                    ((symbol-function 'xwidget-webkit-goto-uri)
+                     (lambda (_xwidget _uri) (cl-incf goto-uri-calls)))
+                    ((symbol-function 'xwidget-at) (lambda (_pos) 'fake-xwidget)))
+            (let ((doclive--server-token "t1"))
+              (with-current-buffer doc-buf
+                (doclive-open-url "http://example/preview1"))
+              (should (= new-session-calls 1))
+              (should (= display-buffer-calls 1))
+              (should (equal display-buffer-action doclive-xwidget-display-buffer-action))
+              (should (= goto-uri-calls 0))
+              (should (buffer-live-p xwidget-buf))
+              (should (buffer-local-value 'doclive-xwidget-preview-mode xwidget-buf))
+              (should (eq (plist-get (doclive--get-entry (doclive--buffer-id doc-buf)) :xwidget-buffer)
+                          xwidget-buf))
+              (with-current-buffer doc-buf
+                (doclive-open-url "http://example/preview2"))
+              (should (= new-session-calls 1))
+              (should (= display-buffer-calls 2))
+              (should (= goto-uri-calls 0)))
+            (let ((doclive--server-token "t2"))
+              (with-current-buffer doc-buf
+                (doclive-open-url "http://example/preview3"))
+              (should (= goto-uri-calls 1))
+              (should (= new-session-calls 1)))))
+      (when (buffer-live-p doc-buf) (kill-buffer doc-buf))
+      (when (buffer-live-p xwidget-buf) (kill-buffer xwidget-buf)))))
+
+(ert-deftest doclive-test-xwidget-open-preview-recreates-when-widget-destroyed ()
+  "A live xwidget buffer whose widget was destroyed should not be reused via `xwidget-webkit-goto-uri'."
+  (let ((doc-buf (generate-new-buffer "doclive-test-xwidget-dead-doc"))
+        (buffers nil)
+        (new-session-calls 0)
+        (goto-uri-calls 0))
+    (unwind-protect
+        (progn
+          (with-current-buffer doc-buf
+            (cl-letf (((symbol-function 'doclive--snapshot-buffer) (lambda (&rest _) nil)))
+              (doclive-preview-mode 1)))
+          (cl-letf (((symbol-function 'doclive-xwidget-available-p) (lambda () t))
+                    ((symbol-function 'xwidget-webkit-new-session)
+                     (lambda (_url)
+                       (cl-incf new-session-calls)
+                       (let ((buf (generate-new-buffer
+                                   (format "doclive-test-xwidget-dead-page-%d" new-session-calls))))
+                         (push buf buffers)
+                         (switch-to-buffer buf))))
+                    ((symbol-function 'display-buffer) (lambda (_buf _action) (selected-window)))
+                    ((symbol-function 'get-buffer-xwidgets) (lambda (_buf) nil))
+                    ((symbol-function 'set-xwidget-query-on-exit-flag) (lambda (&rest _) nil))
+                    ((symbol-function 'xwidget-webkit-goto-uri)
+                     (lambda (_xwidget _uri) (cl-incf goto-uri-calls)))
+                    ((symbol-function 'xwidget-at) (lambda (_pos) 'fake-xwidget)))
+            (let ((doclive--server-token "t1"))
+              (with-current-buffer doc-buf
+                (doclive-open-url "http://example/dead1")))
+            (should (= new-session-calls 1))
+            (let ((first-buf (car buffers)))
+              (should (buffer-live-p first-buf))
+              (let ((doclive--server-token "t1"))
+                (with-current-buffer doc-buf
+                  (doclive-open-url "http://example/dead2")))
+              (should (= new-session-calls 2))
+              (should (= goto-uri-calls 0))
+              (should-not (buffer-live-p first-buf))
+              (let ((second-buf (car buffers)))
+                (should (buffer-live-p second-buf))
+                (should (eq (plist-get (doclive--get-entry (doclive--buffer-id doc-buf)) :xwidget-buffer)
+                            second-buf))))))
+      (when (buffer-live-p doc-buf) (kill-buffer doc-buf))
+      (dolist (buf buffers) (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest doclive-test-xwidget-open-preview-survives-stop-server ()
+  "The owner buffer's local xwidget state should survive `doclive-stop-server' clearing the entry table."
+  (let ((doc-buf (generate-new-buffer "doclive-test-xwidget-persist-doc"))
+        (xwidget-buf nil)
+        (new-session-calls 0)
+        (goto-uri-calls 0)
+        (doclive--server nil)
+        (doclive--buffers (make-hash-table :test #'equal)))
+    (unwind-protect
+        (progn
+          (with-current-buffer doc-buf
+            (cl-letf (((symbol-function 'doclive--snapshot-buffer) (lambda (&rest _) nil)))
+              (doclive-preview-mode 1)))
+          (cl-letf (((symbol-function 'doclive-xwidget-available-p) (lambda () t))
+                    ((symbol-function 'xwidget-webkit-new-session)
+                     (lambda (_url)
+                       (cl-incf new-session-calls)
+                       (setq xwidget-buf (generate-new-buffer "doclive-test-xwidget-persist-page"))
+                       (switch-to-buffer xwidget-buf)))
+                    ((symbol-function 'display-buffer) (lambda (_buf _action) (selected-window)))
+                    ((symbol-function 'get-buffer-xwidgets) (lambda (_buf) '(fake-xwidget)))
+                    ((symbol-function 'set-xwidget-query-on-exit-flag) (lambda (&rest _) nil))
+                    ((symbol-function 'xwidget-webkit-adjust-size-to-window) (lambda (&rest _) nil))
+                    ((symbol-function 'xwidget-webkit-goto-uri)
+                     (lambda (_xwidget _uri) (cl-incf goto-uri-calls)))
+                    ((symbol-function 'xwidget-at) (lambda (_pos) 'fake-xwidget)))
+            (let ((doclive--server-token "t1"))
+              (with-current-buffer doc-buf
+                (doclive-open-url "http://example/persist1")))
+            (should (= new-session-calls 1))
+            (should (buffer-live-p xwidget-buf))
+            (doclive-stop-server)
+            (should (zerop (hash-table-count doclive--buffers)))
+            (should (buffer-live-p xwidget-buf))
+            (let ((doclive--server-token "t2"))
+              (with-current-buffer doc-buf
+                (doclive-open-url "http://example/persist2")))
+            (should (= new-session-calls 1))
+            (should (= goto-uri-calls 1))
+            (should (eq (plist-get (doclive--get-entry (doclive--buffer-id doc-buf)) :xwidget-buffer)
+                        xwidget-buf))))
+      (when (buffer-live-p doc-buf) (kill-buffer doc-buf))
+      (when (buffer-live-p xwidget-buf) (kill-buffer xwidget-buf)))))
+
+(ert-deftest doclive-test-cleanup-entry-kills-xwidget-buffer-on-buffer-kill ()
+  "Killing a previewed document buffer should also kill its xwidget preview buffer."
+  (let ((doc-buf (generate-new-buffer "doclive-test-xwidget-kill-doc"))
+        (xwidget-buf nil))
+    (unwind-protect
+        (progn
+          (with-current-buffer doc-buf
+            (cl-letf (((symbol-function 'doclive--snapshot-buffer) (lambda (&rest _) nil)))
+              (doclive-preview-mode 1))
+            (setq xwidget-buf (generate-new-buffer "doclive-test-xwidget-kill-page"))
+            (let* ((id (doclive--buffer-id doc-buf))
+                   (entry (doclive--get-entry id)))
+              (setf (plist-get entry :xwidget-buffer) xwidget-buf)
+              (doclive--put-entry id entry)))
+          (should (buffer-live-p xwidget-buf))
+          (kill-buffer doc-buf)
+          (should-not (buffer-live-p xwidget-buf)))
+      (when (buffer-live-p doc-buf) (kill-buffer doc-buf))
+      (when (buffer-live-p xwidget-buf) (kill-buffer xwidget-buf)))))
+
+(ert-deftest doclive-test-cleanup-entry-kills-xwidget-buffer-on-preview-mode-disable ()
+  "Disabling preview mode should also kill the associated xwidget preview buffer."
+  (let ((doc-buf (generate-new-buffer "doclive-test-xwidget-disable-doc"))
+        (xwidget-buf nil))
+    (unwind-protect
+        (progn
+          (with-current-buffer doc-buf
+            (cl-letf (((symbol-function 'doclive--snapshot-buffer) (lambda (&rest _) nil)))
+              (doclive-preview-mode 1))
+            (setq xwidget-buf (generate-new-buffer "doclive-test-xwidget-disable-page"))
+            (let* ((id (doclive--buffer-id doc-buf))
+                   (entry (doclive--get-entry id)))
+              (setf (plist-get entry :xwidget-buffer) xwidget-buf)
+              (doclive--put-entry id entry))
+            (should (buffer-live-p xwidget-buf))
+            (doclive-preview-mode -1))
+          (should-not (buffer-live-p xwidget-buf)))
+      (when (buffer-live-p doc-buf) (kill-buffer doc-buf))
+      (when (buffer-live-p xwidget-buf) (kill-buffer xwidget-buf)))))
+
+(ert-deftest doclive-test-stop-server-leaves-xwidget-preview-buffer-live ()
+  "Stopping the server should not kill an open xwidget preview buffer."
+  (let ((xwidget-buf (generate-new-buffer "doclive-test-xwidget-stop-page"))
+        (doclive--server nil)
+        (doclive--server-token "token")
+        (doclive--buffers (make-hash-table :test #'equal)))
+    (unwind-protect
+        (progn
+          (puthash "id" (list :id "id" :xwidget-buffer xwidget-buf) doclive--buffers)
+          (doclive-stop-server)
+          (should (buffer-live-p xwidget-buf)))
+      (when (buffer-live-p xwidget-buf) (kill-buffer xwidget-buf)))))
+
+(ert-deftest doclive-test-xwidget-preview-mode-keymap-remaps-copy-and-yank ()
+  "The xwidget preview keymap should remap copy and yank to preview-aware commands."
+  (should (eq (lookup-key doclive-xwidget-preview-mode-map [remap kill-ring-save])
+              'doclive-xwidget-copy-selection))
+  (should (eq (lookup-key doclive-xwidget-preview-mode-map [remap ns-copy-including-secondary])
+              'doclive-xwidget-copy-selection))
+  (should (eq (lookup-key doclive-xwidget-preview-mode-map [remap yank])
+              'doclive-xwidget-yank-to-search)))
+
+(ert-deftest doclive-test-xwidget-preview-mode-docstring-is-multiline ()
+  "Xwidget preview mode docstring should explain behavior beyond one line."
+  (let ((docstring (documentation 'doclive-xwidget-preview-mode)))
+    (should (stringp docstring))
+    (should (> (length (split-string docstring "\n" t)) 1))))
 
 ;;; doclive-test.el ends here

@@ -5,7 +5,7 @@
 ;; Author: takeokunn <bararararatty@gmail.com>
 ;; Maintainer: takeokunn <bararararatty@gmail.com>
 ;; URL: https://github.com/takeokunn/doclive
-;; Version: 1.2.0
+;; Version: 1.3.0
 ;; Keywords: markdown org tools convenience
 ;; Package-Requires: ((emacs "29.1"))
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -45,7 +45,8 @@
 ;;
 ;; - xwidget WebKit preview by default, with external browser fallback
 ;; - SSE-based live update with debounced change tracking (150 ms)
-;; - Mermaid diagrams (backtick and tilde fences, mmd alias)
+;; - Mermaid diagrams (backtick and tilde fences, mmd alias), with
+;;   Fit / 100% / Expand controls and a zoom/pan overlay
 ;; - KaTeX math with comprehensive LaTeX environments
 ;;   (equation, align, gather, cases, etc.)
 ;; - Syntax highlighting via highlight.js
@@ -54,6 +55,8 @@
 ;; - In-page navigation for linked .md / .org documents
 ;; - Session management: buffer-kill cleanup, Emacs shutdown hook
 ;; - C-u prefix arg on `doclive-preview-buffer' restarts the server
+;; - Preview buffer remaps copy/yank to the xwidget page's selection
+;;   and search box via `doclive-xwidget-preview-mode'
 ;;
 ;; Customization options:
 ;;
@@ -62,6 +65,8 @@
 ;; - doclive-port :: bind port (default 39123)
 ;; - doclive-open-browser-function :: URL opening function (default
 ;;   xwidget-first, falls back to `browse-url')
+;; - doclive-xwidget-display-buffer-action :: display-buffer ACTION for
+;;   the xwidget preview window (default: split right)
 ;; - doclive-change-debounce-ms :: debounce delay in ms (default 150)
 ;; - doclive-preview-asset-urls :: browser asset URLs used by the preview
 ;; - doclive-allow-linked-document-parent-directory :: allow linked document
@@ -79,6 +84,13 @@
 (require 'url-util)
 
 (declare-function xwidget-webkit-new-session "xwidget" (url))
+(declare-function xwidget-webkit-execute-script "xwidget.c" (xwidget script &optional callback))
+(declare-function xwidget-webkit-goto-uri "xwidget.c" (xwidget uri))
+(declare-function xwidget-webkit-current-session "xwidget" ())
+(declare-function xwidget-webkit-adjust-size-to-window "xwidget" (xwidget &optional window))
+(declare-function get-buffer-xwidgets "xwidget.c" (buffer))
+(declare-function set-xwidget-query-on-exit-flag "xwidget.c" (xwidget flag))
+(declare-function xwidget-at "xwidget" (pos))
 
 (defgroup doclive nil
   "Fast Markdown and Org preview for AI-generated documents."
@@ -118,12 +130,16 @@ cookie-authenticated access to local document contents."
     (user-error "This Emacs was not built with xwidget WebKit support"))
   (funcall #'xwidget-webkit-new-session url))
 
+(defvar doclive-preview-mode)
+
 (defun doclive-open-url (url)
   "Open URL with xwidget WebKit, falling back to `browse-url'."
   (interactive "sPreview URL: ")
-  (if (doclive-xwidget-available-p)
-      (doclive-open-url-in-xwidget url)
-    (browse-url url)))
+  (cond
+   ((not (doclive-xwidget-available-p)) (browse-url url))
+   ((bound-and-true-p doclive-preview-mode)
+    (doclive--xwidget-open-preview url (current-buffer)))
+   (t (doclive-open-url-in-xwidget url))))
 
 (defcustom doclive-open-browser-function #'doclive-open-url
   "Function used to open preview URL.
@@ -132,6 +148,62 @@ The default uses xwidget WebKit when available and falls back to
   :type 'function
   :package-version '(doclive . "1.2.0")
   :group 'doclive)
+
+(defcustom doclive-xwidget-display-buffer-action
+  '(display-buffer-in-direction (direction . right))
+  "Display-buffer ACTION used for the xwidget preview."
+  :type 'sexp
+  :package-version '(doclive . "1.3.0")
+  :group 'doclive)
+
+(defun doclive-xwidget-copy-selection ()
+  "Copy the active xwidget preview's text selection to the kill ring."
+  (interactive)
+  (let ((xwidget (xwidget-webkit-current-session)))
+    (unless xwidget
+      (user-error "No active doclive xwidget preview"))
+    (xwidget-webkit-execute-script
+     xwidget
+     "window.getSelection().toString();"
+     (lambda (result)
+       (if (and (stringp result) (not (string-empty-p result)))
+           (progn
+             (kill-new result)
+             (message "Copied %d characters from preview" (length result)))
+         (message "No selection in preview"))))))
+
+(defun doclive--json-escape-line-separators (encoded)
+  "Escape raw U+2028/U+2029 line separators `json-encode-string' leaves in ENCODED.
+Both are valid unescaped JSON string content but invalid unescaped
+JavaScript string content, so a value containing either breaks the
+script it is embedded in."
+  (let ((s (replace-regexp-in-string " " "\\u2028" encoded t t)))
+    (replace-regexp-in-string " " "\\u2029" s t t)))
+
+(defun doclive-xwidget-yank-to-search ()
+  "Send the most recent `kill-ring' entry to the preview page search box."
+  (interactive)
+  (let ((xwidget (xwidget-webkit-current-session)))
+    (unless xwidget
+      (user-error "No active doclive xwidget preview"))
+    (unless kill-ring
+      (user-error "Kill ring is empty"))
+    (xwidget-webkit-execute-script
+     xwidget
+     (format "window.docliveSetSearch(%s);"
+             (doclive--json-escape-line-separators (json-encode-string (current-kill 0))))))
+  (message "doclive preview search updated"))
+
+(define-minor-mode doclive-xwidget-preview-mode
+  "Minor mode active in a doclive xwidget preview buffer.
+Remaps copy and yank commands to operate on the previewed page's
+selection and search box instead of ordinary buffer text."
+  :lighter " doclive"
+  :keymap (let ((map (make-sparse-keymap)))
+            (define-key map [remap kill-ring-save] #'doclive-xwidget-copy-selection)
+            (define-key map [remap ns-copy-including-secondary] #'doclive-xwidget-copy-selection)
+            (define-key map [remap yank] #'doclive-xwidget-yank-to-search)
+            map))
 
 (defcustom doclive-change-debounce-ms 150
   "Debounce delay in milliseconds for after-change snapshots.
@@ -195,6 +267,14 @@ they resolve under the current document's directory."
 
 (defvar-local doclive--buffer-id-value nil
   "Opaque preview ID for the current buffer.")
+
+(defvar-local doclive--xwidget-buffer nil
+  "This document buffer's dedicated xwidget preview buffer, if any.
+Kept buffer-local on the owning document buffer so it survives
+`doclive-stop-server' clearing `doclive--buffers'.")
+
+(defvar-local doclive--xwidget-token nil
+  "Server token the current `doclive--xwidget-buffer' was last opened with.")
 
 (defvar doclive--buffer-id-token-function #'doclive--random-token
   "Function used to create opaque preview IDs for buffers.")
@@ -560,12 +640,56 @@ fall back to openssl rand where /dev/urandom is unavailable."
                           :revision 0
                           :content-kind "markdown"
                           :markdown ""
-                          :html ""))))
+                          :html ""
+                          :xwidget-buffer nil
+                          :xwidget-token nil))))
     (setf (plist-get entry :buffer) buffer)
     (setf (plist-get entry :name) (buffer-name buffer))
     (setf (plist-get entry :file) (buffer-local-value 'buffer-file-name buffer))
+    (setf (plist-get entry :xwidget-buffer) (buffer-local-value 'doclive--xwidget-buffer buffer))
+    (setf (plist-get entry :xwidget-token) (buffer-local-value 'doclive--xwidget-token buffer))
     (doclive--put-entry id entry)
     entry))
+
+(defun doclive--xwidget-remember (owner entry buffer token)
+  "Record BUFFER and TOKEN as the xwidget preview state for OWNER and ENTRY.
+Mirrors the state into both the entry plist and OWNER's buffer-local
+variables so it survives `doclive--buffers' being cleared."
+  (setf (plist-get entry :xwidget-buffer) buffer)
+  (setf (plist-get entry :xwidget-token) token)
+  (doclive--put-entry (plist-get entry :id) entry)
+  (with-current-buffer owner
+    (setq doclive--xwidget-buffer buffer)
+    (setq doclive--xwidget-token token)))
+
+(defun doclive--xwidget-open-preview (url owner)
+  "Open URL in OWNER's dedicated xwidget preview buffer, creating it if needed."
+  (let* ((entry (doclive--ensure-entry owner))
+         (xwidget-buffer (plist-get entry :xwidget-buffer)))
+    (if (and (buffer-live-p xwidget-buffer) (get-buffer-xwidgets xwidget-buffer))
+        (unless (equal (plist-get entry :xwidget-token) doclive--server-token)
+          (xwidget-webkit-goto-uri
+           (with-current-buffer xwidget-buffer (xwidget-at (point-min)))
+           url)
+          (doclive--xwidget-remember owner entry xwidget-buffer doclive--server-token))
+      (when (buffer-live-p xwidget-buffer)
+        (let ((kill-buffer-query-functions nil))
+          (kill-buffer xwidget-buffer)))
+      (let (buf)
+        (save-window-excursion
+          (xwidget-webkit-new-session url)
+          (setq buf (current-buffer)))
+        (with-current-buffer buf
+          (dolist (xw (get-buffer-xwidgets buf))
+            (set-xwidget-query-on-exit-flag xw nil))
+          (doclive-xwidget-preview-mode 1))
+        (doclive--xwidget-remember owner entry buf doclive--server-token)
+        (setq xwidget-buffer buf)))
+    (let ((window (display-buffer xwidget-buffer doclive-xwidget-display-buffer-action)))
+      (when (and window (get-buffer-xwidgets xwidget-buffer))
+        (xwidget-webkit-adjust-size-to-window
+         (car (get-buffer-xwidgets xwidget-buffer)) window)))
+    xwidget-buffer))
 
 (defun doclive--sse-clients-for (id)
   "Return live SSE clients list for ID."
@@ -861,7 +985,7 @@ SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
    ".chip b{font-weight:600;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--pin);}"
    ".chip-close{border:none;background:transparent;color:var(--muted);cursor:pointer;padding:0;font-size:13px;line-height:1;min-height:0;}"
    ".chip-close:hover{color:var(--danger);}"
-   ".md{max-width:840px;margin:0 auto;padding:clamp(28px,5vw,56px) clamp(20px,4vw,40px) 72px;font-size:16.5px;line-height:1.75;animation:doclive-rise .4s ease-out both;}"
+   ".md{max-width:1080px;margin:0 auto;padding:clamp(28px,5vw,56px) clamp(20px,4vw,40px) 72px;font-size:16.5px;line-height:1.75;animation:doclive-rise .4s ease-out both;}"
    ".md h1,.md h2,.md h3,.md h4{font-family:var(--serif);letter-spacing:-.015em;line-height:1.2;scroll-margin-top:64px;}"
    ".md h1{font-size:2.1rem;margin:0 0 .8em;}"
    ".md h2{font-size:1.45rem;margin:2em 0 .7em;padding-bottom:.35em;border-bottom:1px solid var(--border);}"
@@ -873,11 +997,25 @@ SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
    ".md hr{border:none;border-top:1px solid var(--border);margin:2.4em 0;}"
    ".md pre{position:relative;background:var(--code-bg);color:var(--code-text);padding:16px 18px;border:1px solid var(--border);border-radius:10px;overflow:auto;font-size:13px;line-height:1.6;}"
    ".md pre,.md code,.md kbd{font-family:var(--mono);}"
-   ".mermaid-holder{background:var(--code-bg);padding:14px;border:1px solid var(--border);border-radius:10px;overflow:auto;margin:1.2em 0;}"
+   ".mermaid-holder{background:var(--code-bg);padding:14px;border:1px solid var(--border);border-radius:10px;overflow:auto;margin:1.2em 0;max-height:70vh;position:relative;}"
+   ".mermaid-tools{position:absolute;top:8px;right:8px;display:flex;gap:6px;}"
+   ".mermaid-tools button{background:var(--bg-raise);color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:4px 9px;font-size:11px;font-family:var(--mono);cursor:pointer;}"
+   ".mermaid-tools button:hover{color:var(--accent);border-color:var(--accent);}"
+   ".mermaid-holder.is-fit svg{width:100%;height:auto;}"
+   "#mermaid-overlay{position:fixed;inset:0;z-index:50;background:var(--bg);display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:grab;}"
+   ".mermaid-overlay-wrap{transform-origin:0 0;will-change:transform;}"
+   ".mermaid-overlay-close{position:absolute;top:14px;right:14px;background:var(--bg-raise);color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:12px;font-family:var(--mono);cursor:pointer;}"
+   ".mermaid-overlay-close:hover{color:var(--accent);border-color:var(--accent);}"
+   ".mermaid-overlay-hint{position:absolute;left:14px;bottom:14px;color:var(--muted);font-family:var(--mono);font-size:11px;}"
    ".md :not(pre)>code{background:color-mix(in oklab,var(--accent) 12%,transparent);border-radius:4px;padding:.12em .35em;font-size:.86em;}"
    ".md table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.92em;}"
-   ".md th{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:left;}"
+   ".md th{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:left;}"
    ".md th,.md td{border:1px solid var(--border);padding:8px 10px;}"
+   ".table-wrap{overflow-x:auto;margin:1.2em 0}"
+   ".md .table-wrap table{margin:0}"
+   ".md td code,.md th code{white-space:nowrap}"
+   ".md li:has(>input[type=checkbox]){list-style:none;margin-left:-1.4em}"
+   ".md li>input[type=checkbox]{margin-right:.5em;accent-color:var(--accent)}"
    ".frontmatter{margin:0 0 20px;border:1px solid var(--border);border-radius:10px;overflow:hidden;font-family:var(--mono);}"
    ".frontmatter summary{cursor:pointer;padding:10px 12px;font-weight:600;color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.18em;}"
    ".frontmatter table{margin:0;border-collapse:collapse;width:100%;}"
@@ -913,8 +1051,10 @@ SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
    "window.addEventListener('resize',()=>updateScrollPos());"
    "let navStack=[]; let navIndex=-1;"
    "let pinned=[]; let zoom=1;"
-   "marked.setOptions({gfm:true,breaks:true});"
-   "mermaid.initialize({startOnLoad:false,securityLevel:'strict',theme:'dark'});"
+   "marked.setOptions({gfm:true,breaks:false});"
+   "function mermaidTheme(){return document.body.getAttribute('data-theme')==='light'?'default':'dark';}"
+   "function initializeMermaid(){mermaid.initialize({startOnLoad:false,securityLevel:'strict',theme:mermaidTheme()});}"
+   "initializeMermaid();"
    "function parseFrontmatter(md){if(!md.startsWith('---\\n')) return {front:null,body:md}; const end=md.indexOf('\\n---\\n',4); if(end===-1) return {front:null,body:md}; const raw=md.slice(4,end).trim(); const body=md.slice(end+5); const map={}; raw.split('\\n').forEach(line=>{const i=line.indexOf(':'); if(i>0){const k=line.slice(0,i).trim(); const v=line.slice(i+1).trim(); map[k]=v;}}); return {front:map,body};}"
    "function escapeHtml(s){return String(s==null?'':s).replace(/[&<>\"']/g,(ch)=>{if(ch==='&') return '&amp;'; if(ch==='<') return '&lt;'; if(ch==='>') return '&gt;'; if(ch==='\"') return '&quot;'; return '&#39;';});}"
    "function sanitizeUrlValue(value,allowMailto=false){const raw=String(value==null?'':value); const trimmed=raw.trim(); const folded=trimmed.replace(/[\\u0000-\\u001F\\u007F\\s]+/g,'').toLowerCase(); if(!folded||folded.startsWith('//')||trimmed.indexOf(String.fromCharCode(92))!==-1) return ''; if(/[\\u0000-\\u001F\\u007F\\s]/.test(trimmed)) return ''; if(/^[a-z][a-z0-9+.-]*:/.test(folded)&&!(/^https?:/.test(folded)||(allowMailto&&folded.startsWith('mailto:')))) return ''; return trimmed;}"
@@ -924,8 +1064,11 @@ SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
    "let tocLinks=new Map(); let tocHeadings=[];"
    "function updateActiveToc(){if(!tocHeadings.length) return; const line=Math.min(120,window.innerHeight*0.25); let currentId=tocHeadings[0]; tocHeadings.forEach((id)=>{const h=document.getElementById(id); if(h&&h.getBoundingClientRect().top<=line) currentId=id;}); tocLinks.forEach((a)=>a.classList.remove('active')); const active=tocLinks.get(currentId); if(active) active.classList.add('active');}"
    "function buildToc(){tocEl.innerHTML=''; const hs=mdEl.querySelectorAll('h1,h2,h3,h4,h5,h6'); const links=new Map(); hs.forEach((h,i)=>{if(!h.id)h.id='h-'+i; const a=document.createElement('a'); a.href='#'+h.id; a.textContent=h.textContent; a.style.paddingLeft=((parseInt(h.tagName.slice(1))-1)*10+8)+'px'; tocEl.appendChild(a); links.set(h.id,a);}); tocLinks=links; tocHeadings=Array.from(hs).map((h)=>h.id); updateActiveToc();}"
+   "function wrapTables(){mdEl.querySelectorAll('table').forEach((t)=>{if(t.closest('.table-wrap')) return; const wrap=document.createElement('div'); wrap.className='table-wrap'; t.parentNode.insertBefore(wrap,t); wrap.appendChild(t);});}"
    "function highlightCodeBlocks(){mdEl.querySelectorAll('pre code').forEach((code)=>{try{hljs.highlightElement(code);}catch(e){}});}"
-   "function wireCopy(){mdEl.querySelectorAll('pre').forEach((pre)=>{const old=pre.querySelector('.copy-btn'); if(old) old.remove(); const code=pre.querySelector('code'); const src=code||pre; const b=document.createElement('button'); b.className='copy-btn'; b.textContent='Copy'; b.onclick=async()=>{try{await navigator.clipboard.writeText(src.innerText); b.textContent='Copied'; setTimeout(()=>b.textContent='Copy',900);}catch(e){b.textContent='Failed'; setTimeout(()=>b.textContent='Copy',900);}}; pre.appendChild(b);});}"
+   "function fallbackCopyText(text){let ok=false; const sel=document.getSelection(); const prevRange=sel&&sel.rangeCount?sel.getRangeAt(0):null; const ta=document.createElement('textarea'); ta.value=text; ta.setAttribute('readonly',''); ta.style.position='fixed'; ta.style.top='-1000px'; ta.style.left='-1000px'; document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0,ta.value.length); try{ok=document.execCommand('copy');}catch(e){ok=false;} document.body.removeChild(ta); if(sel){sel.removeAllRanges(); if(prevRange) sel.addRange(prevRange);} return ok;}"
+   "function wireCopy(){mdEl.querySelectorAll('pre').forEach((pre)=>{const old=pre.querySelector('.copy-btn'); if(old) old.remove(); const code=pre.querySelector('code'); const src=code||pre; const b=document.createElement('button'); b.className='copy-btn'; b.textContent='Copy'; b.onclick=async()=>{let ok=false; if(navigator.clipboard&&navigator.clipboard.writeText){try{await navigator.clipboard.writeText(src.innerText); ok=true;}catch(e){ok=false;}} if(!ok){ok=fallbackCopyText(src.innerText);} b.textContent=ok?'Copied':'Failed'; setTimeout(()=>b.textContent='Copy',900);}; pre.appendChild(b);});}"
+   "function normalizeMermaidSvgSize(svg){if(!svg) return; if(svg.getAttribute('width')==='100%') svg.removeAttribute('width'); const style=svg.getAttribute('style'); if(style){const stripped=style.replace(/max-width\\s*:[^;]+;?/i,'').trim(); if(stripped){svg.setAttribute('style',stripped);}else{svg.removeAttribute('style');}} const vb=(svg.getAttribute('viewBox')||'').trim().split(/\\s+/); if(vb.length===4){const w=parseFloat(vb[2]); const h=parseFloat(vb[3]); if(w>0&&!isNaN(w)) svg.setAttribute('width',String(w)); if(h>0&&!isNaN(h)) svg.setAttribute('height',String(h));}}"
    "async function renderMermaid(){"
    "const blocks=Array.from(mdEl.querySelectorAll('pre code.language-mermaid, pre code.language-mmd, pre.src-mermaid, pre.src.src-mermaid'));"
    "for(const el of blocks){"
@@ -935,10 +1078,17 @@ SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
    "else{graph=el.textContent||'';}"
    "if(!graph.trim()) continue;"
    "const holder=document.createElement('div'); holder.className='mermaid-holder';"
-   "try{const out=await mermaid.render('m'+Math.random().toString(36).slice(2),graph); setSanitizedSvg(holder,out.svg);}"
+   "try{const out=await mermaid.render('m'+Math.random().toString(36).slice(2),graph); setSanitizedSvg(holder,out.svg); normalizeMermaidSvgSize(holder.querySelector('svg'));}"
    "catch(e){holder.className='render-error'; holder.textContent=graph;}"
    "if(pre&&pre.parentNode) pre.parentNode.replaceChild(holder,pre);"
-   "}}"
+   "}"
+   "wireMermaidTools();"
+   "}"
+   "function wireMermaidTools(){mdEl.querySelectorAll('.mermaid-holder').forEach((holder)=>{const old=holder.querySelector('.mermaid-tools'); if(old) old.remove(); const svg=holder.querySelector('svg'); if(!svg) return; const bar=document.createElement('div'); bar.className='mermaid-tools'; const fit=document.createElement('button'); fit.type='button'; fit.textContent='Fit'; fit.onclick=()=>{svg.style.width='100%'; svg.style.height='auto'; holder.classList.add('is-fit');}; const natural=document.createElement('button'); natural.type='button'; natural.textContent='100%'; natural.onclick=()=>{svg.style.width=''; svg.style.height=''; holder.classList.remove('is-fit');}; const expand=document.createElement('button'); expand.type='button'; expand.textContent='Expand'; expand.onclick=()=>openMermaidOverlay(svg); bar.appendChild(fit); bar.appendChild(natural); bar.appendChild(expand); holder.appendChild(bar);});}"
+   "let mermaidScale=1,mermaidTx=0,mermaidTy=0,mermaidOverlayWrap=null,mermaidOverlayDragging=false,mermaidOverlayLastX=0,mermaidOverlayLastY=0,mermaidOverlayReturnFocus=null;"
+   "function applyMermaidOverlayTransform(){if(!mermaidOverlayWrap) return; mermaidOverlayWrap.style.transform='translate('+mermaidTx+'px,'+mermaidTy+'px) scale('+mermaidScale+')';}"
+   "function closeMermaidOverlay(){const overlay=document.getElementById('mermaid-overlay'); if(!overlay) return; overlay.remove(); mermaidOverlayWrap=null; mermaidScale=1; mermaidTx=0; mermaidTy=0; const returnTo=mermaidOverlayReturnFocus; mermaidOverlayReturnFocus=null; if(returnTo&&document.contains(returnTo)) returnTo.focus();}"
+   "function openMermaidOverlay(svg){const invoker=document.activeElement; closeMermaidOverlay(); mermaidOverlayReturnFocus=invoker; const overlay=document.createElement('div'); overlay.id='mermaid-overlay'; overlay.setAttribute('role','dialog'); overlay.setAttribute('aria-modal','true'); overlay.setAttribute('aria-label','Expanded diagram'); const wrap=document.createElement('div'); wrap.className='mermaid-overlay-wrap'; const clone=svg.cloneNode(true); clone.style.width=''; clone.style.height=''; wrap.appendChild(clone); const closeBtn=document.createElement('button'); closeBtn.type='button'; closeBtn.className='mermaid-overlay-close'; closeBtn.textContent='Close'; closeBtn.setAttribute('aria-label','Close diagram'); closeBtn.onclick=closeMermaidOverlay; const hint=document.createElement('div'); hint.className='mermaid-overlay-hint'; hint.textContent='Scroll to zoom, drag to pan. Esc or Close to exit.'; mermaidOverlayWrap=wrap; mermaidScale=1; mermaidTx=0; mermaidTy=0; applyMermaidOverlayTransform(); overlay.appendChild(wrap); overlay.appendChild(closeBtn); overlay.appendChild(hint); overlay.addEventListener('wheel',(ev)=>{ev.preventDefault(); const px=ev.clientX; const py=ev.clientY; const prevScale=mermaidScale; const factor=Math.exp(-ev.deltaY*0.0015); mermaidScale=Math.min(8,Math.max(0.2,mermaidScale*factor)); const ratio=mermaidScale/prevScale; mermaidTx=px-(px-mermaidTx)*ratio; mermaidTy=py-(py-mermaidTy)*ratio; applyMermaidOverlayTransform();},{passive:false}); overlay.addEventListener('mousedown',(ev)=>{if(ev.target===closeBtn) return; mermaidOverlayDragging=true; mermaidOverlayLastX=ev.clientX; mermaidOverlayLastY=ev.clientY;}); overlay.addEventListener('mousemove',(ev)=>{if(!mermaidOverlayDragging) return; mermaidTx+=ev.clientX-mermaidOverlayLastX; mermaidTy+=ev.clientY-mermaidOverlayLastY; mermaidOverlayLastX=ev.clientX; mermaidOverlayLastY=ev.clientY; applyMermaidOverlayTransform();}); overlay.addEventListener('mouseup',()=>{mermaidOverlayDragging=false;}); overlay.addEventListener('mouseleave',()=>{mermaidOverlayDragging=false;}); overlay.addEventListener('click',(ev)=>{if(ev.target===overlay) closeMermaidOverlay();}); document.body.appendChild(overlay); closeBtn.focus();}"
    "function renderMath(){"
    "if(!window.renderMathInElement) return;"
    "try{renderMathInElement(mdEl,{delimiters:["
@@ -969,21 +1119,23 @@ SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
    "function escReg(s){return s.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&');}"
    "function replaceTextNode(node,re,cls){const text=node.nodeValue; let m,last=0; const frag=document.createDocumentFragment(); while((m=re.exec(text))!==null){if(m.index>last) frag.appendChild(document.createTextNode(text.slice(last,m.index))); const mark=document.createElement('mark'); mark.className=cls; mark.textContent=m[0]; frag.appendChild(mark); last=re.lastIndex; if(re.lastIndex===m.index) re.lastIndex++;} if(last<text.length) frag.appendChild(document.createTextNode(text.slice(last))); node.parentNode.replaceChild(frag,node);}"
    "function walkAndHighlight(root,re,cls){const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode(n){if(!n.nodeValue.trim()) return NodeFilter.FILTER_REJECT; const p=n.parentNode; if(!p) return NodeFilter.FILTER_REJECT; if(p.closest&&p.closest('script,style,code,pre,.katex,svg')) return NodeFilter.FILTER_REJECT; return NodeFilter.FILTER_ACCEPT;}}); const nodes=[]; while(walker.nextNode()) nodes.push(walker.currentNode); nodes.forEach(n=>replaceTextNode(n,re,cls));}"
-   "function applyHighlights(){const html=mdEl.getAttribute('data-base-html')||mdEl.innerHTML; mdEl.innerHTML=html; highlightCodeBlocks(); const q=(searchEl.value||'').trim(); if(q){walkAndHighlight(mdEl,new RegExp(escReg(q),'gi'),'mark-pin-0');} pinned.forEach((term,idx)=>{if(term){walkAndHighlight(mdEl,new RegExp(escReg(term),'gi'),'mark-pin-'+(idx%4));}}); wireCopy(); wireDocumentLinkNavigation();}"
+   "function applyHighlights(){const html=mdEl.getAttribute('data-base-html')||mdEl.innerHTML; mdEl.innerHTML=html; highlightCodeBlocks(); const q=(searchEl.value||'').trim(); if(q){walkAndHighlight(mdEl,new RegExp(escReg(q),'gi'),'mark-pin-0');} pinned.forEach((term,idx)=>{if(term){walkAndHighlight(mdEl,new RegExp(escReg(term),'gi'),'mark-pin-'+(idx%4));}}); wireCopy(); wireMermaidTools(); wireDocumentLinkNavigation();}"
    "function renderChips(){chipsEl.innerHTML=''; pinned.forEach((term,idx)=>{const el=document.createElement('span'); el.className='chip'; const label=document.createElement('b'); label.textContent=term; el.appendChild(label); const c=document.createElement('button'); c.className='chip-close'; c.textContent='×'; c.setAttribute('aria-label','Remove pinned highlight: '+term); c.onclick=()=>{pinned=pinned.filter((_,i)=>i!==idx); applyHighlights(); renderChips();}; el.appendChild(c); chipsEl.appendChild(el);});}"
    "function normalizeTheme(theme){return theme==='light'?'light':'dark';}"
    "function getStoredTheme(){try{return localStorage.getItem('doclive-theme');}catch(e){return null;}}"
    "function storeTheme(theme){try{localStorage.setItem('doclive-theme',theme);}catch(e){}}"
-   "function applyTheme(theme){theme=normalizeTheme(theme); document.body.setAttribute('data-theme',theme); storeTheme(theme); themeEl.value=theme;}"
+   "function applyTheme(theme){theme=normalizeTheme(theme); document.body.setAttribute('data-theme',theme); storeTheme(theme); themeEl.value=theme; initializeMermaid();}"
    "function applyZoom(){mdEl.style.fontSize=(zoom*100)+'%';}"
    "function pushNav(id,name){if(navIndex>=0&&navStack[navIndex]&&navStack[navIndex].id===id) return; navStack=navStack.slice(0,navIndex+1); navStack.push({id:id,name:name||''}); navIndex=navStack.length-1; updateNavButtons();}"
    "function updateNavButtons(){document.getElementById('back').disabled=navIndex<=0; document.getElementById('forward').disabled=navIndex<0||navIndex>=navStack.length-1;}"
    "let es=null;"
    "async function fetchContent(){const r=await fetch('/content?id='+encodeURIComponent(currentId),{cache:'no-store'}); return r.json();}"
-   "async function applyContent(j){if(!j.ok){statusEl.textContent=j.error||'not found'; dotEl.className='dot dot-disconnected'; return;} statusEl.textContent='live • rev '+j.revision+' • '+(j.name||''); dotEl.className='dot'; if(j.revision===lastRev) return; lastRev=j.revision; const kind=j.contentKind||'markdown'; let html=''; if(kind==='org-html'){html=j.html||'';}else{const parsed=parseFrontmatter(j.markdown||''); html=renderFrontmatter(parsed.front)+marked.parse(parsed.body||'');} html=sanitizeHtml(html); mdEl.setAttribute('data-content-kind',kind); mdEl.innerHTML=html; wireCopy(); renderMath(); await renderMermaid(); buildToc(); mdEl.setAttribute('data-base-html',mdEl.innerHTML); applyHighlights(); applyZoom(); pushNav(currentId,j.name||''); history.replaceState({id:currentId},'',`?id=${encodeURIComponent(currentId)}`); updateScrollPos();}"
+   "async function applyContent(j){if(!j.ok){statusEl.textContent=j.error||'not found'; dotEl.className='dot dot-disconnected'; return;} statusEl.textContent='live • rev '+j.revision+' • '+(j.name||''); dotEl.className='dot'; document.title=j.name?j.name+' - doclive':'doclive'; if(j.revision===lastRev) return; lastRev=j.revision; const kind=j.contentKind||'markdown'; let html=''; if(kind==='org-html'){html=j.html||'';}else{const parsed=parseFrontmatter(j.markdown||''); html=renderFrontmatter(parsed.front)+marked.parse(parsed.body||'');} html=sanitizeHtml(html); mdEl.setAttribute('data-content-kind',kind); mdEl.innerHTML=html; wireCopy(); renderMath(); await renderMermaid(); buildToc(); wrapTables(); mdEl.setAttribute('data-base-html',mdEl.innerHTML); applyHighlights(); applyZoom(); pushNav(currentId,j.name||''); history.replaceState({id:currentId},'',`?id=${encodeURIComponent(currentId)}`); updateScrollPos();}"
    "async function openLinkedDocument(href){try{const r=await fetch('/open?id='+encodeURIComponent(currentId)+'&path='+encodeURIComponent(href),{cache:'no-store'}); const j=await r.json(); if(!j.ok){statusEl.textContent=j.error||'open failed'; return;} currentId=j.buffer_id; lastRev=-1; connectSSE(); const c=await fetchContent(); await applyContent(c);}catch(e){statusEl.textContent='open failed';}}"
    "function wireDocumentLinkNavigation(){mdEl.querySelectorAll('a[href]').forEach(a=>{const href=a.getAttribute('href')||''; if(/^[a-zA-Z][a-zA-Z0-9+.-]*:/i.test(href)||href.startsWith('#')||href.startsWith('//')||href.indexOf(String.fromCharCode(92))!==-1) return; if(!/\\.(md|org|html)($|#|\\?)/i.test(href)) return; a.addEventListener('click',ev=>{ev.preventDefault(); openLinkedDocument(href);});});}"
    "function connectSSE(){if(!currentId){statusEl.textContent='missing id'; dotEl.className='dot dot-disconnected'; return;} if(es){es.close(); es=null;} es=new EventSource('/events?id='+encodeURIComponent(currentId)); es.addEventListener('open',()=>{statusEl.textContent='connected'; dotEl.className='dot';}); es.addEventListener('revision',async()=>{try{const j=await fetchContent(); await applyContent(j);}catch(e){statusEl.textContent='sync error';}}); es.onerror=()=>{statusEl.textContent='reconnecting…'; dotEl.className='dot dot-disconnected';};}"
+   "window.docliveSetSearch=function(text){searchEl.value=String(text==null?'':text); applyHighlights();};"
+   "document.addEventListener('keydown',(ev)=>{if(ev.key==='Escape') closeMermaidOverlay();});"
    "searchEl.addEventListener('input',()=>applyHighlights());"
    "pinEl.addEventListener('click',()=>{const q=(searchEl.value||'').trim(); if(!q) return; if(!pinned.includes(q)) pinned.push(q); renderChips(); applyHighlights();});"
    "themeEl.addEventListener('change',()=>applyTheme(themeEl.value));"
@@ -997,18 +1149,20 @@ SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
    "(async()=>{try{const j=await fetchContent(); await applyContent(j);}catch(e){statusEl.textContent='initial load failed'; dotEl.className='dot dot-disconnected';} connectSSE();})();")
   "Client-side JavaScript for the doclive preview page.")
 
-(defun doclive--preview-html (&optional script-nonce)
+(defun doclive--preview-html (&optional script-nonce title)
   "Return the complete self-contained preview HTML page.
 The page embeds marked.js for Markdown rendering, highlight.js for
 syntax highlighting, KaTeX for math typesetting with comprehensive
 LaTeX environment support, Mermaid.js for diagram rendering, and an
 SSE client for live-update support.  SCRIPT-NONCE is applied to inline
-runtime script and style when it is safe for CSP nonce use."
+runtime script and style when it is safe for CSP nonce use.  TITLE,
+when non-nil, names the previewed buffer in the page's <title>."
   (concat
    "<!doctype html><html><head><meta charset='utf-8'>"
    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
    "<meta name='referrer' content='no-referrer'>"
-   "<title>doclive</title><link rel='icon' href='data:,'>"
+   "<title>" (doclive--escape-html (if title (concat title " - doclive") "doclive")) "</title>"
+   "<link rel='icon' href='data:,'>"
    "<link rel='stylesheet' href='" (doclive--preview-asset-url 'highlight-css) "'"
    (doclive--preview-asset-integrity-attrs 'highlight-css) ">"
    "<link rel='stylesheet' href='" (doclive--preview-asset-url 'katex-css) "'"
@@ -1312,14 +1466,18 @@ are still allowed."
   (format "/preview?id=%s"
           (url-hexify-string (or (doclive--query-param path "id") ""))))
 
-(defun doclive--send-preview (proc)
-  "Send the preview page on PROC and close it."
-  (let ((script-nonce (doclive--random-token))
-        (cookie-header (doclive--session-cookie-header)))
+(defun doclive--send-preview (proc &optional path)
+  "Send the preview page on PROC and close it.
+PATH, when supplied, is used to look up the previewed buffer's name
+for the page title."
+  (let* ((script-nonce (doclive--random-token))
+         (cookie-header (doclive--session-cookie-header))
+         (id (and path (doclive--query-param path "id")))
+         (name (and id (plist-get (doclive--get-entry id) :name))))
     (process-send-string
      proc
      (doclive--http-response "200 OK" "text/html"
-                              (doclive--preview-html script-nonce)
+                              (doclive--preview-html script-nonce name)
                               script-nonce
                               (and cookie-header (list cookie-header))))
     (delete-process proc)))
@@ -1347,12 +1505,12 @@ are still allowed."
   (cond
    ((doclive--route-matches-p path "/")
     (if (doclive--authorized-request-p path headers)
-        (doclive--send-preview proc)
+        (doclive--send-preview proc path)
       (doclive--send-forbidden proc)))
    ((doclive--route-matches-p path "/preview")
     (cond
      ((doclive--authorized-request-p path headers)
-      (doclive--send-preview proc))
+      (doclive--send-preview proc path))
      ((doclive--query-key-present-p path "bootstrap")
       (if (doclive--consume-bootstrap-code-p path)
           (doclive--send-bootstrap-redirect proc path)
@@ -1487,12 +1645,26 @@ are still allowed."
 (defun doclive--cleanup-entry (entry)
   "Clean up SSE clients for ENTRY and release its buffer tracking."
   (let* ((id (plist-get entry :id))
-         (clients (doclive--sse-clients-for id)))
+         (clients (doclive--sse-clients-for id))
+         (owner (plist-get entry :buffer))
+         (owner-xwidget-buffer (and (buffer-live-p owner)
+                                     (buffer-local-value 'doclive--xwidget-buffer owner)))
+         (xwidget-buffers (delete-dups
+                            (delq nil (list (plist-get entry :xwidget-buffer)
+                                             owner-xwidget-buffer)))))
     (doclive--cancel-change-timer-by-id id)
     (dolist (proc clients)
       (when (process-live-p proc)
         (delete-process proc)))
     (doclive--set-sse-clients-for id nil)
+    (dolist (xwidget-buffer xwidget-buffers)
+      (when (buffer-live-p xwidget-buffer)
+        (let ((kill-buffer-query-functions nil))
+          (kill-buffer xwidget-buffer))))
+    (when (buffer-live-p owner)
+      (with-current-buffer owner
+        (setq doclive--xwidget-buffer nil)
+        (setq doclive--xwidget-token nil)))
     (doclive--remove-entry id)))
 
 (defun doclive--cleanup-stale-entries ()
@@ -1607,14 +1779,17 @@ inactivity, preventing excessive processing during rapid typing."
 (defun doclive--on-kill ()
   "Clean up doclive tracking when previewed buffer is killed."
   (when doclive-preview-mode
-    (let ((id (doclive--buffer-id (current-buffer))))
-      (doclive--cancel-change-timer-by-id id)
-      (let ((clients (doclive--sse-clients-for id)))
-        (dolist (proc clients)
-          (when (process-live-p proc)
-            (delete-process proc))))
-      (doclive--set-sse-clients-for id nil)
-      (doclive--remove-entry id))))
+    (let* ((id (doclive--buffer-id (current-buffer)))
+           (entry (doclive--get-entry id)))
+      (if entry
+          (doclive--cleanup-entry entry)
+        (doclive--cancel-change-timer-by-id id)
+        (let ((clients (doclive--sse-clients-for id)))
+          (dolist (proc clients)
+            (when (process-live-p proc)
+              (delete-process proc))))
+        (doclive--set-sse-clients-for id nil)
+        (doclive--remove-entry id)))))
 
 ;;;###autoload
 (define-minor-mode doclive-preview-mode
