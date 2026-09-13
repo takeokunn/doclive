@@ -57,7 +57,7 @@ MELPA へ登録後は次の手順でインストールできます。
 
 #+begin_src emacs-lisp
 (use-package doclive
-  :commands (doclive-preview-buffer doclive-preview-file doclive-stop-server doclive-reload-page))
+  :commands (doclive-open-wiki doclive-preview-buffer doclive-preview-file doclive-stop-server doclive-reload-page))
 #+end_src
 
 ** From source checkout
@@ -68,6 +68,36 @@ MELPA へ登録後は次の手順でインストールできます。
 #+end_src
 
 * Usage
+
+** Wikiをまとめて閲覧
+
+=M-x doclive-open-wiki= でWikiのルートディレクトリを指定します。
+Markdown文書を置いた通常のフォルダをルートとして使えます。
+次回からは最近開いたルートを補完候補から選べます。
+ルートのREADMEを開き、READMEがなければパス順で最初の文書を開きます。
+Emacsで訪問するのは選択したページだけです。
+
+Libraryサイドバーでフォルダをたどるか、Search all pages欄でWiki全体のタイトル、パス、本文を検索します。
+ツールバーのLibraryボタンでサイドバーを開閉できます。
+タイトルやパスの断片を空白で区切ると、順序を問わず検索できます。
+たとえば =ref sto= で =reference/storage.md= が見つかります。
+本文では入力全体をそのまま連続一致で検索します。
+タイトルやパスの一致を本文だけの一致より先に表示し、結果は最大100件です。
+上限を超える結果を見るには検索語を絞り込んでください。結果の次ページはありません。
+サイドバーのSavedタブにはブックマーク、Recentには閲覧したページが表示されます。
+本文上のSave pageでブックマークすると、そのボタンがSavedに変わり、再度押すと解除します。文書内容の保存とは別の操作です。
+ツールバーのFind in pageは現在の文書を検索します。その隣のPinは、別ページに移動しても検索語のハイライトを保持します。
+ピン留めした検索語はページ固有ではない共通の閲覧設定で、別のWikiを開いたときも復元します。
+検索語のチップにある×で解除できます。ページのブックマークとは異なります。
+ツールバーのDark/Lightでテーマを、A-・A・A+で文字サイズを変更できます。
+Wiki内の遷移はシンボリックリンクの解決後も指定ルート内に限定されます。
+ディレクトリへのシンボリックリンクと =.git=、=.svn=、=node_modules=、=.cache= は索引から除外します。
+
+最近開いたルート、閲覧履歴、ブックマーク、テーマ、倍率、検索ピンは =doclive-wiki-state-file= に保存します。
+既定の保存先はEmacsのユーザーディレクトリ内の =doclive-wiki.json= です。
+=M-x customize-option RET doclive-wiki-state-file RET= でこのオプションを変更できます。
+=nil= にすると、設定の保持は現在のEmacsセッション内だけになります。
+保存ファイルにはローカルのWikiパスを含むため、文書リポジトリにはコミットしないでください。
 
 ** 現在の Markdown / Org バッファをプレビュー
 
@@ -90,9 +120,10 @@ M-x doclive-preview-file
 ** ローカルリンク遷移
 
 プレビュー内の =.md= / =.org= への相対リンクをクリックすると、同じ doclive 画面内でリンク先を開きます。
-fragment や query はファイル解決時には無視され、remote URL や未対応拡張子は開きません。
-既定では、リンク先はクリック元ファイルのディレクトリ配下に限定されます。
+fragment や query はファイル解決時には無視され、remote URL や未対応拡張子はローカル文書として開きません。HTTP(S)リンクはブラウザのリンクとして扱います。
+既定では、シンボリックリンク解決後の実パスで判定し、リンク先をクリック元ファイルのディレクトリ配下に限定します。
 =../notes.md= のように親ディレクトリへ出るリンクを許可したい場合は、信頼できる文書だけで =doclive-allow-linked-document-parent-directory= を有効にしてください。
+Wikiモードでは指定したWikiルートが境界となり、このオプションを有効にしてもルート外には移動できません。
 
 #+begin_src org
 [[file:example/sample.md][Markdown sample]]
@@ -117,11 +148,12 @@ M-x doclive-reload-page
 
 ** キーバインド
 
-doclive は既定のキーバインドを提供しません。使うコマンドを好みのキーに割り当ててください。
+doclive はグローバルなキーバインドを追加しません。起動コマンドを好みのキーに割り当ててください。
 
 #+begin_src emacs-lisp
-(with-eval-after-load 'doclive
-  (define-key markdown-mode-map (kbd "C-c C-v") #'doclive-preview-buffer)
+(with-eval-after-load 'markdown-mode
+  (define-key markdown-mode-map (kbd "C-c C-v") #'doclive-preview-buffer))
+(with-eval-after-load 'org
   (define-key org-mode-map      (kbd "C-c C-v") #'doclive-preview-buffer))
 #+end_src
 
@@ -131,12 +163,19 @@ doclive は既定のキーバインドを提供しません。使うコマンド
 
 doclive が開いた xwidget プレビューバッファでは、バッファローカルなマイナーモード =doclive-xwidget-preview-mode= が有効になります。
 バッファ名はプレビューページのタイトルから付け直され、文書名を含みます。
-このマイナーモードは独自のキーを追加せず、既存のコピー/ヤンクのキーをプレビューページに対して動作するようにリマップするだけです。
+次のキーはプレビューバッファ内だけで有効です。
 
-- =kill-ring-save=（=M-w=）と macOS の =ns-copy-including-secondary=（=s-c=）は =doclive-xwidget-copy-selection= にリマップされ、ページ内で選択中のテキストを kill ring に入れます。
-- =yank=（=C-y=, =s-v=）は =doclive-xwidget-yank-to-search= にリマップされ、kill ring の先頭をページ内検索ボックスに入れてハイライトします。
+- =C-s= または =s-f= : Emacs のミニバッファからページ内を検索。検索中の =C-s= で次、=C-r= で前の一致へ移動します。
+- =s-k= : ミニバッファから Wiki のファイル名と本文を検索します。
+- =Escape= : 検索、サイドバー、拡大した図を閉じます。
+- =M-<left>= / =M-<right>= : 閲覧履歴を戻る / 進む。
 
-プレビューバッファでのそれ以外のキー入力は、Emacs 標準の =xwidget-webkit-edit-mode= を有効にしない限り、ページではなく Emacs 側に渡ります。
+- =kill-ring-save=（=M-w=）と macOS の =ns-copy-including-secondary=（=s-c=）はページ内で選択中のテキストを kill ring に入れます。
+- =yank=（=C-y=, =s-v=）はフォーカス中のテキスト入力欄へ kill ring の先頭を貼り付けます。Wiki 検索欄にも使えます。入力欄にフォーカスがなければ、ページ内検索ボックスに入れて一致をハイライトします。
+
+コードブロックの Copy ボタンも Emacs の kill ring に送ります。
+文字入力と編集キーは、フォーカス中の HTML 要素へ直接渡します。=xwidget-webkit-edit-mode= への切替は不要です。
+=C-x= と =M-x= は引き続き Emacs のコマンドとして使えます。
 
 * Customization
 
@@ -166,7 +205,7 @@ preview HTML と HTTP response は =no-referrer= を設定し、bootstrap code �
 inline runtime script は session cookie とは別の response-local nonce で許可され、request-line は origin-form の絶対パスだけを受け付けます。nonce のない inline script は常に拒否されます。
 =style-src= は inline style を許可します。KaTeX と Mermaid は生成した style 属性や SVG 内 style 要素で描画結果を配置し、これらは CSP nonce では許可できないためです。文書由来の HTML については、sanitizer が =style= 要素と =style= 属性を DOM 挿入前に除去するため、この許可の対象になりません。信頼済みの Mermaid SVG 出力（=securityLevel: strict= で生成）だけが自身のスタイルを保持します。
 この SVG は文書ではなく Mermaid のレンダラが生成します。=strict= では Mermaid が図ラベル内の HTML をエンコードし click 指定を無効にするため、図のソースからマークアップやハンドラを注入できません。
-サーバーはディスク上のファイルを配信しません。ルートはプレビューページ、=/content=、=/open=、=/events= だけなので、文書から到達できるローカルファイルは相対リンク先の =.md= / =.org= に限られ、その範囲はローカルリンク遷移の節のとおり制限されます。
+静的ファイルを配信するルートはありません。Cookie認可された =/workspace= と =/search= はWiki文書の一覧と検索、=/open= は文書を開く操作、=/content= と =/events= はプレビュー更新を担当します。=/copy= はプレビューのテキストをEmacsのkill ringに送ります。文書へのアクセス範囲はローカルリンク遷移の節のとおり制限されます。
 
 非loopback hostに bind すると、同一ネットワーク上のブラウザからも到達可能になります。
 必要な場合だけ =doclive-host= を変更し、=doclive-allow-non-loopback-host= を非nilにしてください。
@@ -178,17 +217,10 @@ preview URL は信頼できる相手以外へ渡さないでください。
 また、文書本文から生成された =href= / =src= / =xlink:href= / =formaction= / =action= / =poster= は、相対リンク・アンカー・=http:= / =https:= だけを保持し、=mailto:= は =href= / =xlink:href= のみで許可します。その他の scheme、protocol-relative URL、バックスラッシュ、制御文字・空白を含むURLは DOM 挿入前に削除します。
 =srcset= は複合URLリストとして解釈が必要なため、DOM 挿入前に削除します。
 
-ローカルリンク遷移は既定でクリック元ファイルのディレクトリ配下に限定されます。
-この判定はシンボリックリンク解決後の実パスで行うため、クリック元ディレクトリ内のリンク名が外部ファイルを指していても既定では開きません。
-これにより、外部から受け取った文書内の =../secret.md= や外部ファイルへ向くシンボリックリンクを誤クリックして、意図しないローカル Markdown / Org をプレビューへ読み込むリスクを下げます。
-
-報告手順と境界の全体像は [[file:SECURITY.md][SECURITY.md]] を参照してください。
-
 * Comparison with alternatives
 
 - =markdown-preview-mode= / =grip= :: Markdown のみを描画します。doclive は Org、Mermaid、KaTeX も描画し、両形式を 1 つの SSE サーバーでライブ更新します。
-- =org-preview-html= :: 変更ごとに Org を静的ファイルへ export します。doclive はファイルシステムに書かずに差分を push します。
-- doclive は WebSocket 化、remote file fetch、Org Babel 実行、Org publishing を意図的に対象外としています（[[*Scope][Scope]] を参照）。
+- =org-preview-html= :: 変更ごとに Org を静的ファイルへ export します。doclive は更新番号を通知し、ブラウザがメモリ上のスナップショット全体を取得します。中間HTMLファイルは作りません。
 
 * Development
 
@@ -217,6 +249,7 @@ git diff --check
 Chromium / Google Chrome が =PATH= にない場合は =CHROMIUM_BIN= で実行ファイルを指定してください。
 =make security= は secret scan、GitHub Actions lint、workflow security scan を実行します。
 これらの CLI を個別に導入しない場合は =nix develop= で開発環境に入ってください。
+Chromiumの同梱はLinuxのみです。macOSではChromeまたはChromiumを別途導入してください。
 pre-commit を使う場合は、同じ最終ゲートを hook から実行できます。
 
 #+begin_src sh
@@ -224,6 +257,7 @@ pre-commit run --all-files
 #+end_src
 
 =nix flake check= は compile / test / lint / package-lint / security / smoke / browser-smoke を個別の sandbox で実行します。
+このうちbrowser-smokeはLinuxのみです。
 autoloads、check-js、=git diff --check= は =make check= だけが実行するため、PR や release 前には =make check= を最終ゲートとしてください。
 
 #+begin_src sh
@@ -231,7 +265,6 @@ nix flake check
 #+end_src
 
 daemon smoke では =example/sample.md= と =example/sample.org= を使い、daemon 起動、初回 bootstrap、cookie 認可、=/content=、=/events=、=/open=、force restart、停止経路を確認します。
-サーバ起動経路だけを単体で確認する場合は下記を実行してください。
 
 #+begin_src sh
 make smoke
@@ -259,9 +292,9 @@ Emacs と Org のバージョン、ハードウェア、OS、実行時の負荷�
 - *図、数式、シンタックスハイライトが描画されない* :: Mermaid、KaTeX、highlight.js はブラウザ側で外部 CDN から読み込みます。ブラウザ console と network log を確認してください。オフラインやプロキシ環境では =doclive-preview-asset-urls= を自前のミラー、ローカル配信先、またはプロキシに向けてください。
 - *サーバーが bind に失敗する* :: エラーにポート番号が表示されます。=doclive-port= を空いているポートに変更してください。
 - *Org Babel、=(eval …)= マクロ、=#+INCLUDE:=、=#+SETUPFILE:= が動かない* :: Org preview は Emacs built-in の =org= / =ox-html= で HTML fragment に export し、これらの機能を拒否します。信頼できない文書を開いただけでコードが実行されたり、文書自身以外のローカルファイルが読まれたりしないためです。
-- *相対リンクが開かない* :: remote URL、=.el=、=.html=、=.pdf= はローカルリンク遷移の対象外です。クリック元ディレクトリの外にあるリンク先も既定では拒否されます。
+- *相対リンクが開かない* :: remote URL、=.el=、=.html=、=.pdf= はローカルリンク遷移の対象外です。クリック元ディレクトリの外にあるリンク先も既定では拒否されます。Wikiモードでは指定したルートが境界です。
 - *サーバーが起動しない* :: token 生成には =/dev/urandom= か =openssl= が必要です。どちらもない環境（=PATH= に openssl がない素の Windows など）では起動に失敗します。
-- *大きな Mermaid 図が読みにくい* :: 図の Fit または 100% 操作でその場のサイズを調整するか、Expand で全画面オーバーレイを開いてマウスホイールでのズームとドラッグでのパンを使ってください。オーバーレイは閉じるボタンか背景クリックで閉じます。外部ブラウザでは Escape でも閉じます。xwidget プレビュー内では =xwidget-webkit-edit-mode= を有効にしている場合だけ Escape がページに届きます。
+- *大きな Mermaid 図が読みにくい* :: 図の Fit または 100% 操作でその場のサイズを調整するか、Expand で全画面オーバーレイを開いてマウスホイールでのズームとドラッグでのパンを使ってください。オーバーレイは閉じるボタン、背景クリック、Escape で閉じます。Escape は xwidget プレビューでも使えます。
 
 * Contributing
 
@@ -284,13 +317,7 @@ doclive は GPL-3.0-or-later で配布されています。
 
 * Scope
 
-MVP 内:
-
-- Markdown / Org のプレビュー表示
-- =.md= / =.org= のローカル相対リンク遷移
-- Mermaid、KaTeX、コードコピー、検索 / ピン留めハイライト
-
-MVP 外:
+対象外:
 
 - WebSocket 化
 - remote file fetch

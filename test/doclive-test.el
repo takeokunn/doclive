@@ -19,6 +19,7 @@
 (require 'cl-lib)
 (require 'ert)
 (require 'doclive)
+(defvar xwidget-webkit-mode-map)
 (eval-and-compile
   (load "doclive-test-helpers" nil t))
 
@@ -648,7 +649,7 @@
   "Preview HTML should contain core runtime hooks."
   (let ((html (doclive--preview-html)))
     (should (string-match-p "EventSource" html))
-    (should (string-match-p "function pushNav" html))
+    (should (string-match-p "function recordNavigation" html))
     (should (string-match-p "mermaid" html))
     (should (string-match-p "katex" (downcase html)))))
 
@@ -965,7 +966,7 @@ never inline scripts."
     (should
      (string-match-p
       (regexp-quote
-       "html=sanitizeHtml(html); mdEl.setAttribute('data-content-kind',kind); mdEl.innerHTML=html; wireCopy(); renderMath(); await renderMermaid(); buildToc();")
+       "html=sanitizeHtml(html); mdEl.setAttribute('data-content-kind',kind); mdEl.innerHTML=html; wireCopy(); renderMath(); await renderMermaid();")
       html))))
 
 (ert-deftest doclive-test-preview-html-renders-pinned-chips-with-dom-apis ()
@@ -1008,7 +1009,7 @@ never inline scripts."
         (needle (regexp-quote "wireDocumentLinkNavigation(")))
     (should
      (string-match-p
-      (regexp-quote "applyHighlights(); applyZoom(); pushNav")
+      (regexp-quote "applyHighlights(); applyZoom(); updateScrollPos();")
       html))
     (should-not
      (string-match-p
@@ -1031,16 +1032,16 @@ never inline scripts."
     (should-not (string-match-p "currentToken=qs.get('token')" html))
     (should-not (string-match-p "function authedPath" html))
     (should (string-match-p
-             (regexp-quote "fetch('/content?id='+encodeURIComponent(currentId)")
+             (regexp-quote "fetch('/content?id='+encodeURIComponent(id)")
              html))
     (should (string-match-p
              (regexp-quote "fetch('/open?id='+encodeURIComponent(currentId)+'&path='+encodeURIComponent(href)")
              html))
     (should (string-match-p
-             (regexp-quote "new EventSource('/events?id='+encodeURIComponent(currentId))")
+             (regexp-quote "new EventSource('/events?id='+encodeURIComponent(id))")
              html))
     (should (string-match-p
-             (regexp-quote "history.replaceState({id:currentId},'',`?id=${encodeURIComponent(currentId)}`)")
+             (regexp-quote "history.replaceState({id:currentId,docliveIndex:0},'',navigationUrl(currentId,location.hash))")
              html))
     (should-not
      (string-match-p
@@ -2841,7 +2842,7 @@ never inline scripts."
   "Preview should expose a window-level hook to drive the search field."
   (let ((html (doclive--preview-html)))
     (should (string-match-p
-             (regexp-quote "window.docliveSetSearch=function(text){searchEl.value=String(text==null?'':text); applyHighlights();};")
+             (regexp-quote "window.docliveSetSearch=function(text){searchEl.value=String(text==null?'':text); applyHighlights();searchMatchIndex=-1;return window.docliveSearchNext(false);};")
              html))))
 
 (ert-deftest doclive-test-preview-html-sets-document-title-from-name ()
@@ -2872,51 +2873,95 @@ never inline scripts."
 
 ;; Xwidget preview mode: copy/yank and lifecycle
 
+(defmacro doclive-test--with-trusted-xwidget (&rest body)
+  (declare (indent 0) (debug t))
+  `(with-temp-buffer
+     (let ((doclive--buffers (make-hash-table :test #'equal))
+           (doclive--server-token "test-token")
+           (doclive-host "127.0.0.1")
+           (doclive-port 39123)
+           (preview-buffer (current-buffer)))
+       (puthash "page" (list :xwidget-buffer preview-buffer
+                              :xwidget-token doclive--server-token)
+                doclive--buffers)
+       (cl-letf (((symbol-function 'xwidget-webkit-current-session)
+                  (lambda () 'fake-xwidget))
+                 ((symbol-function 'get-buffer-xwidgets)
+                  (lambda (buffer)
+                    (when (eq buffer preview-buffer) '(fake-xwidget))))
+                 ((symbol-function 'xwidget-webkit-uri)
+                  (lambda (_widget) "http://127.0.0.1:39123/preview?id=page")))
+         ,@body))))
+
 (ert-deftest doclive-test-xwidget-copy-selection-kills-nonempty-result ()
   "Copying the preview selection should push a non-empty result onto the kill ring."
-  (let ((kill-ring nil)
-        recorded-script)
-    (cl-letf (((symbol-function 'xwidget-webkit-current-session) (lambda () 'fake-xwidget))
-              ((symbol-function 'xwidget-webkit-execute-script)
-               (lambda (_xwidget script callback)
-                 (setq recorded-script script)
-                 (funcall callback "hello"))))
-      (doclive-xwidget-copy-selection))
-    (should (equal (car kill-ring) "hello"))
-    (should (string-match-p "getSelection" recorded-script))))
+  (doclive-test--with-trusted-xwidget
+    (let ((kill-ring nil)
+          recorded-script)
+      (cl-letf (((symbol-function 'xwidget-webkit-current-session) (lambda () 'fake-xwidget))
+		((symbol-function 'xwidget-webkit-execute-script)
+		 (lambda (_xwidget script callback)
+                   (setq recorded-script script)
+                   (funcall callback "hello"))))
+	(doclive-xwidget-copy-selection))
+      (should (equal (car kill-ring) "hello"))
+      (should (string-match-p "getSelection" recorded-script)))))
 
 (ert-deftest doclive-test-xwidget-copy-selection-ignores-empty-result ()
   "Copying an empty preview selection should leave the kill ring unchanged."
-  (let ((kill-ring nil))
-    (cl-letf (((symbol-function 'xwidget-webkit-current-session) (lambda () 'fake-xwidget))
-              ((symbol-function 'xwidget-webkit-execute-script)
-               (lambda (_xwidget _script callback) (funcall callback ""))))
-      (doclive-xwidget-copy-selection))
-    (should-not kill-ring)))
+  (doclive-test--with-trusted-xwidget
+    (let ((kill-ring nil))
+      (cl-letf (((symbol-function 'xwidget-webkit-current-session) (lambda () 'fake-xwidget))
+		((symbol-function 'xwidget-webkit-execute-script)
+		 (lambda (_xwidget _script callback) (funcall callback ""))))
+	(doclive-xwidget-copy-selection))
+      (should-not kill-ring))))
 
 (ert-deftest doclive-test-xwidget-yank-to-search-sends-json-escaped-script ()
   "Yanking to search should JSON-escape the kill-ring text in the sent script."
-  (let ((kill-ring (list "a\"b\nc\\"))
-        recorded-script)
-    (cl-letf (((symbol-function 'xwidget-webkit-current-session) (lambda () 'fake-xwidget))
-              ((symbol-function 'xwidget-webkit-execute-script)
-               (lambda (_xwidget script &optional _callback) (setq recorded-script script))))
-      (doclive-xwidget-yank-to-search))
-    (should (string-prefix-p "window.docliveSetSearch(" recorded-script))
-    (should (string-search "\"a\\\"b\\nc\\\\\"" recorded-script))))
+  (doclive-test--with-trusted-xwidget
+    (let ((kill-ring (list "a\"b\nc\\"))
+          recorded-script)
+      (cl-letf (((symbol-function 'xwidget-webkit-current-session) (lambda () 'fake-xwidget))
+		((symbol-function 'xwidget-webkit-execute-script)
+		 (lambda (_xwidget script &optional _callback) (setq recorded-script script))))
+	(doclive-xwidget-yank-to-search))
+      (should (string-search "window.doclivePaste(" recorded-script))
+      (should (string-search "\"a\\\"b\\nc\\\\\"" recorded-script)))))
+
+(ert-deftest doclive-test-xwidget-yank-reports-only-confirmed-paste ()
+  (doclive-test--with-trusted-xwidget
+    (let ((kill-ring '("hello"))
+          callback messages)
+      (cl-letf (((symbol-function 'xwidget-webkit-execute-script)
+                 (lambda (_widget _script &optional completion)
+                   (setq callback completion)))
+                ((symbol-function 'message)
+                 (lambda (format-string &rest args)
+                   (push (apply #'format format-string args) messages))))
+        (doclive-xwidget-yank-to-search)
+        (should-not messages)
+        (should (functionp callback))
+        (funcall callback "pasted")
+        (should (equal (pop messages) "Pasted into doclive preview"))
+        (funcall callback "rejected")
+        (should (equal (pop messages) "Cannot paste into this preview input"))
+        (funcall callback nil)
+        (should (equal (pop messages) "Paste unavailable: preview changed or is not ready"))))))
 
 (ert-deftest doclive-test-xwidget-yank-to-search-escapes-line-separators ()
   "Yanking to search should escape raw U+2028/U+2029 that `json-encode-string' leaves unescaped."
-  (let ((kill-ring (list (concat "a" (string ? ) "b" (string ? ) "c")))
-        recorded-script)
-    (cl-letf (((symbol-function 'xwidget-webkit-current-session) (lambda () 'fake-xwidget))
-              ((symbol-function 'xwidget-webkit-execute-script)
-               (lambda (_xwidget script &optional _callback) (setq recorded-script script))))
-      (doclive-xwidget-yank-to-search))
-    (should (string-search "\\u2028" recorded-script))
-    (should (string-search "\\u2029" recorded-script))
-    (should-not (string-match-p (string ? ) recorded-script))
-    (should-not (string-match-p (string ? ) recorded-script))))
+  (doclive-test--with-trusted-xwidget
+    (let ((kill-ring (list (concat "a" (string ? ) "b" (string ? ) "c")))
+          recorded-script)
+      (cl-letf (((symbol-function 'xwidget-webkit-current-session) (lambda () 'fake-xwidget))
+		((symbol-function 'xwidget-webkit-execute-script)
+		 (lambda (_xwidget script &optional _callback) (setq recorded-script script))))
+	(doclive-xwidget-yank-to-search))
+      (should (string-search "\\u2028" recorded-script))
+      (should (string-search "\\u2029" recorded-script))
+      (should-not (string-match-p (string ? ) recorded-script))
+      (should-not (string-match-p (string ? ) recorded-script)))))
 
 (ert-deftest doclive-test-xwidget-open-preview-creates-and-reuses-buffer ()
   "Opening a preview URL from a preview-mode buffer should create, then reuse, the xwidget buffer."
@@ -3122,10 +3167,617 @@ never inline scripts."
   (should (eq (lookup-key doclive-xwidget-preview-mode-map [remap yank])
               'doclive-xwidget-yank-to-search)))
 
+(ert-deftest doclive-test-xwidget-preview-mode-direct-input ()
+  "Preview input should reach WebKit without enabling another minor mode."
+  (require 'xwidget)
+  (with-temp-buffer
+    (use-local-map xwidget-webkit-mode-map)
+    (let ((original-g (key-binding "g"))
+          (original-prefix (key-binding (kbd "C-x"))))
+      (doclive-xwidget-preview-mode 1)
+      (dolist (key '("g" "a" "b" "f" "r" "w" "SPC" "日" "RET" "TAB" "DEL"
+                     "<backspace>" "<left>" "<right>" "<up>" "<down>"))
+        (should (eq (key-binding (kbd key)) 'xwidget-webkit-pass-command-event)))
+      (should (eq (key-binding (kbd "C-s")) 'doclive-xwidget-search))
+      (should (eq (key-binding (kbd "s-c")) 'doclive-xwidget-copy-selection))
+      (should (eq (key-binding (kbd "M-<left>")) 'doclive-xwidget-back))
+      (should (eq (key-binding (kbd "M-x")) 'execute-extended-command))
+      (should (eq (key-binding (kbd "C-x")) original-prefix))
+      (doclive-xwidget-preview-mode -1)
+      (should (eq (key-binding "g") original-g)))))
+
 (ert-deftest doclive-test-xwidget-preview-mode-docstring-is-multiline ()
   "Xwidget preview mode docstring should explain behavior beyond one line."
   (let ((docstring (documentation 'doclive-xwidget-preview-mode)))
     (should (stringp docstring))
     (should (> (length (split-string docstring "\n" t)) 1))))
+
+(ert-deftest doclive-test-wiki-files-indexes-documents-without-opening-buffers ()
+  "Directory discovery should not visit documents or evaluate local variables."
+  (doclive-test--with-temp-linked-files
+   '(("README.md" . "# Handbook\n")
+     ("reference/data.org" . "* Data\n")
+     ("tutorials/start.md" . "# Start\n")
+     ("assets/image.svg" . "<svg/>")
+     (".git/secret.md" . "# Internal\n"))
+   (lambda (root)
+     (cl-letf (((symbol-function 'find-file-noselect)
+                (lambda (&rest _) (ert-fail "Index visited a file"))))
+       (should
+        (equal (mapcar (lambda (path) (file-relative-name path (file-truename root)))
+                       (doclive--wiki-files root))
+               '("README.md" "reference/data.org" "tutorials/start.md")))))))
+
+(ert-deftest doclive-test-wiki-files-rejects-symlink-escape-and-cycle ()
+  "Indexing should stay within the chosen root and terminate on cycles."
+  (doclive-test--with-temp-linked-files
+   '(("outside.md" . "# Outside\n") ("wiki/README.md" . "# Home\n"))
+   (lambda (parent)
+     (let ((root (expand-file-name "wiki" parent)))
+       (make-symbolic-link (expand-file-name "outside.md" parent)
+                          (expand-file-name "escape.md" root))
+       (make-symbolic-link parent (expand-file-name "escape-dir" root))
+       (make-symbolic-link root (expand-file-name "cycle" root))
+       (should (equal (doclive--wiki-files root)
+                      (list (file-truename
+                             (expand-file-name "README.md" root)))))))))
+
+(ert-deftest doclive-test-wiki-files-refreshes-created-and-deleted-documents ()
+  "A new index should reflect filesystem changes without visiting files."
+  (doclive-test--with-temp-linked-files
+   '(("README.md" . "# Home\n"))
+   (lambda (root)
+     (let ((added (expand-file-name "new.md" root)))
+       (should (= 1 (length (doclive--wiki-files root))))
+       (with-temp-file added (insert "# Added\n"))
+       (should (= 2 (length (doclive--wiki-files root))))
+       (delete-file added)
+       (should (= 1 (length (doclive--wiki-files root))))))))
+
+(ert-deftest doclive-test-wiki-search-matches-body-and-unicode ()
+  "Search should return a body snippet and root-relative navigation path."
+  (doclive-test--with-temp-linked-files
+   '(("README.md" . "# Home\nNo matching content.\n")
+     ("reference/storage.md" . "# Storage\n設定の変更は再起動なしで反映されます。\n"))
+   (lambda (root)
+     (cl-letf (((symbol-function 'find-file-noselect)
+                (lambda (&rest _) (ert-fail "Search visited a file"))))
+       (let ((hits (doclive--wiki-search root "再起動")))
+         (should (= 1 (length hits)))
+         (should (equal (plist-get (car hits) :path) "reference/storage.md"))
+         (should (stringp (plist-get (car hits) :name)))
+         (should (string-match-p "再起動" (plist-get (car hits) :snippet))))))))
+
+(ert-deftest doclive-test-wiki-search-treats-query-as-literal-text ()
+  "Query punctuation should not execute as a regular expression."
+  (doclive-test--with-temp-linked-files
+   '(("README.md" . "# Home\nUse [a.*] as literal text.\n")
+     ("other.md" . "# Other\nA plain sentence.\n"))
+   (lambda (root)
+     (let ((hits (doclive--wiki-search root "[a.*]")))
+       (should (= 1 (length hits)))
+       (should (equal (plist-get (car hits) :path) "README.md")))
+     (should-not (doclive--wiki-search root ""))
+     (should-not (doclive--wiki-search root "not-present-anywhere")))))
+
+(ert-deftest doclive-test-wiki-search-preserves-case-insensitive-literals ()
+  (doclive-test--with-temp-linked-files
+   '(("path[A.*].md" . "# Document\n")
+     ("body.md" . "# Other\nUse BODY[A.*] literally.\n")
+     ("pathAAAA.md" . "# Decoy\nBODYAAAA\n"))
+   (lambda (root)
+     (dolist (query-path '(("PATH[a.*]" . "path[A.*].md")
+                           ("body[a.*]" . "body.md")))
+       (should (equal (mapcar (lambda (hit) (plist-get hit :path))
+                             (doclive--wiki-search root (car query-path)))
+                      (list (cdr query-path)))))
+     (dolist (query '(nil "" " \t\n "))
+       (should-not (doclive--wiki-search root query))))))
+
+(ert-deftest doclive-test-wiki-search-tokenizes-only-combined-metadata ()
+  (doclive-test--with-temp-linked-files
+   '(("guide/接続-v2.md" . "# 設定 [A.*]\n")
+     ("body.md" . "# Other\n接続 then [A.*] then 設定\n")
+     ("partial.md" . "# 設定 [A.*]\n接続\n")
+     ("guide/接続-decoy.md" . "# 設定 AAAA\n"))
+   (lambda (root)
+     (dolist (query '("[a.*] 接続" "接続 [A.*]" " 設定\t接続\n[a.*] "))
+       (should (equal (mapcar (lambda (hit) (plist-get hit :path))
+                             (doclive--wiki-search root query))
+                      '("guide/接続-v2.md"))))
+     (should-not (doclive--wiki-search root "接続 [a.*] missing")))))
+
+(ert-deftest doclive-test-wiki-search-ranks-metadata-before-body ()
+  (doclive-test--with-temp-linked-files
+   '(("91-alpha beta.md" . "# Path match\n")
+     ("90-title.md" . "# ALPHA BETA\n")
+     ("21-beta.md" . "# Alpha\n")
+     ("20-token.md" . "# Beta then Alpha\n")
+     ("19-beta-then-alpha.md" . "# Path tokens\n")
+     ("01-body.md" . "# Second\nalpha beta\n")
+     ("00-body.md" . "# First\nALPHA BETA\n")
+     ("02-scattered.md" . "# Neither\nalpha then beta\n")
+     ("03-partial.md" . "# Alpha\nbeta\n"))
+   (lambda (root)
+     (should (equal (mapcar (lambda (hit) (plist-get hit :path))
+                           (doclive--wiki-search root "alpha beta"))
+                    '("90-title.md" "91-alpha beta.md"
+                      "19-beta-then-alpha.md" "20-token.md" "21-beta.md"
+                      "00-body.md" "01-body.md"))))))
+
+(ert-deftest doclive-test-wiki-search-limits-after-ranking ()
+  (doclive-test--with-temp-linked-files
+   (append (cl-loop for index below 101
+                    collect (cons (format "%03d-body.md" index)
+                                  "# Body\nalpha beta\n"))
+           '(("z-exact.md" . "# Alpha Beta\n")
+             ("zz-beta.md" . "# Alpha\n")))
+   (lambda (root)
+     (let ((paths (mapcar (lambda (hit) (plist-get hit :path))
+                          (doclive--wiki-search root "alpha beta"))))
+       (should (= 100 (length paths)))
+       (should (equal paths
+                      (append '("z-exact.md" "zz-beta.md")
+                              (cl-loop for index below 98
+                                       collect (format "%03d-body.md" index)))))))))
+
+(ert-deftest doclive-test-wiki-search-does-not-visit-token-or-literal-hits ()
+  (doclive-test--with-temp-linked-files
+   '(("beta.md" . "# Alpha\n")
+     ("body.md" . "# Body\nLiteral marker\n"))
+   (lambda (root)
+     (let ((files (doclive--wiki-files root)))
+       (dolist (file files)
+         (should-not (find-buffer-visiting file)))
+       (cl-letf (((symbol-function 'find-file-noselect)
+                  (lambda (&rest _) (ert-fail "Search visited a file"))))
+         (should (= 1 (length (doclive--wiki-search root "literal marker"))))
+         (should (= 1 (length (doclive--wiki-search root "beta alpha")))))
+       (dolist (file files)
+         (should-not (find-buffer-visiting file)))))))
+
+(ert-deftest doclive-test-wiki-search-does-not-return-excluded-content ()
+  "Repository internals and files outside the workspace must not be searched."
+  (doclive-test--with-temp-linked-files
+   '(("outside.md" . "needle\n") ("wiki/README.md" . "# Home\n")
+     ("wiki/.git/private.md" . "needle\n"))
+   (lambda (parent)
+     (let ((root (expand-file-name "wiki" parent)))
+       (make-symbolic-link (expand-file-name "outside.md" parent)
+                          (expand-file-name "leak.md" root))
+       (make-symbolic-link (expand-file-name ".git/private.md" root)
+                          (expand-file-name "internal.md" root))
+       (should-not (doclive--wiki-search root "needle"))))))
+
+(ert-deftest doclive-test-wiki-state-round-trips-reading-history ()
+  "Reading history should survive reloading the JSON state file."
+  (doclive-test--with-temp-linked-files
+   '(("README.md" . "# Home\n"))
+   (lambda (directory)
+     (let* ((root (file-name-as-directory (file-truename directory)))
+            (doclive-wiki-state-file (expand-file-name "state.json" directory))
+            (doclive--wiki-state nil)
+            (doclive--wiki-state-loaded nil))
+       (doclive--wiki-remember-page root (expand-file-name "README.md" root))
+       (should (file-exists-p doclive-wiki-state-file))
+       (setq doclive--wiki-state nil doclive--wiki-state-loaded nil)
+       (doclive--wiki-load-state)
+       (should (equal (alist-get (intern root)
+                                (alist-get 'recent doclive--wiki-state))
+                      '("README.md")))
+       (should (= #o600 (logand #o777 (file-modes doclive-wiki-state-file))))))))
+
+(ert-deftest doclive-test-wiki-search-prefers-unsaved-edits ()
+  "Search should see live edits without saving the source document."
+  (doclive-test--with-temp-linked-files
+   '(("README.md" . "# Home\nDisk text.\n"))
+   (lambda (root)
+     (let* ((file (expand-file-name "README.md" root))
+            (buffer (find-file-noselect file)))
+       (unwind-protect
+           (progn
+             (with-current-buffer buffer
+               (goto-char (point-max))
+               (insert "Unsaved marker\n"))
+             (should (= 1 (length (doclive--wiki-search root "Unsaved marker"))))
+             (with-temp-buffer
+               (insert-file-contents file)
+               (goto-char (point-min))
+               (should-not (search-forward "Unsaved marker" nil t))))
+         (with-current-buffer buffer (set-buffer-modified-p nil))
+         (kill-buffer buffer))))))
+
+(ert-deftest doclive-test-wiki-workspace-persists-preferences ()
+  "Workspace choices should round-trip without leaking a filesystem root."
+  (doclive-test--with-temp-linked-files
+   '(("README.md" . "# Home\n"))
+   (lambda (directory)
+     (let* ((root (file-name-as-directory (file-truename directory)))
+            (doclive-wiki-state-file (expand-file-name "state.json" root))
+            (doclive--wiki-state nil)
+            (doclive--wiki-state-loaded nil)
+            (doclive--buffers (make-hash-table :test #'equal)))
+       (puthash "wiki" (list :id "wiki" :wiki-root root
+                             :file (expand-file-name "README.md" root))
+                doclive--buffers)
+       (doclive--wiki-workspace
+        "wiki" "/workspace?id=wiki&bookmark=README.md&value=1&theme=light&zoom=1.2&pins=%5B%22needle%22%5D")
+       (setq doclive--wiki-state nil doclive--wiki-state-loaded nil)
+       (let ((data (doclive--wiki-workspace "wiki" "/workspace?id=wiki")))
+         (should (equal (alist-get 'bookmarks data) ["README.md"]))
+         (should (equal (alist-get 'theme data) "light"))
+         (should (= (alist-get 'zoom data) 1.2))
+         (should (equal (alist-get 'pins data) ["needle"]))
+         (should-not (string-match-p (regexp-quote root) (json-encode data))))))))
+
+(ert-deftest doclive-test-wiki-routes-require-authentication ()
+  "Wiki metadata, search and navigation should reject unauthenticated clients."
+  (let ((doclive--server-token "secret"))
+    (dolist (path '("/workspace?id=wiki" "/search?id=wiki&q=needle"
+                    "/open?id=wiki&path=README.md&wiki=1"))
+      (let (response closed)
+        (cl-letf (((symbol-function 'process-send-string)
+                   (lambda (_proc string) (setq response string)))
+                  ((symbol-function 'delete-process)
+                   (lambda (_proc) (setq closed t))))
+          (doclive--route-request 'fake-proc path)
+          (should (string-match-p "HTTP/1.1 403 Forbidden" response))
+          (should closed))))))
+
+(ert-deftest doclive-test-wiki-open-rejects-outside-root ()
+  "Wiki navigation must stay bounded even when standalone parent links are allowed."
+  (doclive-test--with-temp-linked-files
+   '(("outside.md" . "# Outside\n") ("wiki/README.md" . "# Home\n"))
+   (lambda (directory)
+     (let* ((root (file-name-as-directory
+                   (file-truename (expand-file-name "wiki" directory))))
+            (doclive--buffers (make-hash-table :test #'equal))
+            (doclive-allow-linked-document-parent-directory t))
+       (puthash "wiki" (list :id "wiki" :wiki-root root
+                             :file (expand-file-name "README.md" root))
+                doclive--buffers)
+       (cl-letf (((symbol-function 'find-file-noselect)
+                  (lambda (&rest _) (ert-fail "Outside page was visited"))))
+         (let ((response (json-parse-string (doclive--wiki-open "wiki" "../outside.md")
+                                            :object-type 'alist :false-object nil)))
+           (should-not (alist-get 'ok response))
+           (should (stringp (alist-get 'error response)))))))))
+
+(ert-deftest doclive-test-wiki-command-visits-only-readme ()
+  "Opening a Wiki should visit its entry page, not every indexed page."
+  (doclive-test--with-temp-linked-files
+   '(("README.md" . "# Home\n") ("guide.md" . "# Guide\n"))
+   (lambda (directory)
+     (let* ((root (file-name-as-directory (file-truename directory)))
+            (doclive-wiki-state-file nil)
+            (doclive--wiki-state nil)
+            (doclive--wiki-state-loaded t)
+            previewed)
+       (unwind-protect
+           (cl-letf (((symbol-function 'doclive-preview-buffer)
+                      (lambda (&rest _) (setq previewed (current-buffer)))))
+             (doclive-open-wiki directory)
+             (should (buffer-live-p previewed))
+             (should (equal (file-truename (buffer-file-name previewed))
+                            (expand-file-name "README.md" root)))
+             (should (equal (buffer-local-value 'doclive--wiki-root previewed) root))
+             (should-not (find-buffer-visiting (expand-file-name "guide.md" root)))
+             (should (equal (alist-get 'roots doclive--wiki-state) (list root))))
+         (when (buffer-live-p previewed) (kill-buffer previewed)))))))
+
+(ert-deftest doclive-test-xwidget-preview-keys-are-buffer-local ()
+  (dolist (binding '(("C-s" . doclive-xwidget-search)
+                     ("C-r" . doclive-xwidget-search-backward)
+                     ("s-f" . doclive-xwidget-search)
+                     ("s-k" . doclive-xwidget-wiki-search)
+                     ("s-c" . doclive-xwidget-copy-selection)
+                     ("M-w" . doclive-xwidget-copy-selection)
+                     ("C-y" . doclive-xwidget-yank-to-search)
+                     ("<escape>" . doclive-xwidget-dismiss)
+                     ("M-<left>" . doclive-xwidget-back)
+                     ("M-<right>" . doclive-xwidget-forward)))
+    (should (eq (lookup-key doclive-xwidget-preview-mode-map (kbd (car binding)))
+                (cdr binding)))
+    (should-not (eq (lookup-key (current-global-map) (kbd (car binding)))
+                    (cdr binding)))))
+
+(ert-deftest doclive-test-xwidget-navigation-and-dismiss-bridge ()
+  (doclive-test--with-trusted-xwidget
+    (setq doclive--xwidget-search-text "needle"
+          doclive--xwidget-wiki-search-text "guide")
+    (let (scripts)
+      (cl-letf (((symbol-function 'xwidget-webkit-current-session) (lambda () 'fake-xwidget))
+                ((symbol-function 'xwidget-webkit-execute-script)
+                 (lambda (_widget script &optional _callback) (push script scripts))))
+        (doclive-xwidget-back)
+        (doclive-xwidget-forward)
+        (doclive-xwidget-dismiss))
+      (should (= (length scripts) 3))
+      (cl-mapc (lambda (script command)
+                (should (string-suffix-p (concat command "})()") script)))
+              (nreverse scripts)
+              '("history.back();" "history.forward();" "window.docliveDismiss();"))
+      (should (equal doclive--xwidget-search-text ""))
+      (should (equal doclive--xwidget-wiki-search-text "")))))
+
+(ert-deftest doclive-test-copy-route-authenticates-before-changing-kill-ring ()
+  (let ((doclive--server-token "secret")
+        (doclive--buffers (make-hash-table :test #'equal))
+        (kill-ring '("control"))
+        (interprogram-cut-function nil)
+        response)
+    (puthash "page" '(:id "page") doclive--buffers)
+    (cl-letf (((symbol-function 'process-send-string)
+               (lambda (_proc string) (setq response string)))
+              ((symbol-function 'delete-process) #'ignore))
+      (doclive--route-request 'fake "/copy?id=page&text=bad")
+      (should (string-match-p "403 Forbidden" response))
+      (should (equal kill-ring '("control")))
+      (cl-letf (((symbol-function 'doclive--authorized-request-p) (lambda (&rest _) t)))
+        (doclive--route-request 'fake "/copy?id=missing&text=bad")
+        (should (string-match-p "400 Bad Request" response))
+        (should (equal kill-ring '("control")))
+        (doclive--route-request 'fake "/copy?id=page&text=%22%E6%A4%9C%E7%B4%A2%5Cncode%22")
+        (should (string-match-p "200 OK" response))
+        (should (equal (car kill-ring) "検索\ncode"))))))
+
+(ert-deftest doclive-test-wiki-open-rejects-excluded-targets ()
+  (doclive-test--with-temp-linked-files
+   '(("README.md" . "# Home\n") (".git/private.md" . "needle\n"))
+   (lambda (directory)
+     (let* ((root (file-name-as-directory (file-truename directory)))
+            (doclive--buffers (make-hash-table :test #'equal)))
+       (make-symbolic-link (expand-file-name ".git/private.md" root)
+                          (expand-file-name "internal.md" root))
+       (puthash "wiki" (list :id "wiki" :wiki-root root
+                             :file (expand-file-name "README.md" root))
+                doclive--buffers)
+       (cl-letf (((symbol-function 'find-file-noselect)
+                  (lambda (&rest _) (ert-fail "Excluded page was visited"))))
+         (dolist (path '(".git/private.md" "internal.md"))
+           (let ((result (json-parse-string (doclive--wiki-open "wiki" path)
+                                            :object-type 'alist :false-object nil)))
+             (should-not (alist-get 'ok result)))))))))
+
+(ert-deftest doclive-test-wiki-exclusions-respect-filesystem-case-sensitivity ()
+  (doclive-test--with-temp-linked-files
+   '(("README.md" . "# Home\n"))
+   (lambda (directory)
+     (let ((root (file-name-as-directory (file-truename directory))))
+       (dolist (insensitive '(nil t))
+         (cl-letf (((symbol-function 'file-name-case-insensitive-p)
+                    (lambda (_file) insensitive))
+                   ((symbol-function 'file-truename) #'identity))
+           (should (doclive--wiki-path-allowed-p
+                    (expand-file-name "guide/page.md" root) root))
+           (should-not (doclive--wiki-path-allowed-p
+                        (expand-file-name "../outside.md" root) root))
+           (dolist (excluded '(".git" ".svn" "node_modules" ".cache"))
+             (should-not (doclive--wiki-path-allowed-p
+                          (expand-file-name (concat excluded "/private.md") root)
+                          root))
+             (should (eq (not (null (doclive--wiki-path-allowed-p
+                                    (expand-file-name
+                                     (concat (upcase excluded) "/private.md") root)
+                                    root)))
+                         (not insensitive))))))))))
+
+(ert-deftest doclive-test-wiki-case-alias-exclusion-on-real-filesystem ()
+  (doclive-test--with-temp-linked-files
+   '(("README.md" . "# Home\n") (".git/private.md" . "private needle\n"))
+   (lambda (directory)
+     (let* ((root (file-name-as-directory (file-truename directory)))
+            (alias (expand-file-name ".GIT/private.md" root))
+            (aliased (file-exists-p alias))
+            (doclive--buffers (make-hash-table :test #'equal)))
+       (message "Wiki real-FS case alias: %S" aliased)
+       (make-symbolic-link (if aliased alias
+                            (expand-file-name ".git/private.md" root))
+                          (expand-file-name "internal.md" root))
+       (puthash "wiki" (list :id "wiki" :wiki-root root
+                             :file (expand-file-name "README.md" root))
+                doclive--buffers)
+       (should (doclive--wiki-path-allowed-p
+                (expand-file-name "README.md" root) root))
+       (should (equal (doclive--wiki-files root)
+                      (list (expand-file-name "README.md" root))))
+       (should-not (doclive--wiki-search root "private needle"))
+       (cl-letf (((symbol-function 'find-file-noselect)
+                  (lambda (&rest _) (ert-fail "Excluded page was visited"))))
+         (dolist (path (append '(".git/private.md" "internal.md")
+                              (when aliased '(".GIT/private.md"))))
+           (should-not (doclive--wiki-path-allowed-p
+                        (expand-file-name path root) root))
+           (should-not (doclive--resolve-linked-document
+                        (doclive--get-entry "wiki") path))
+           (should-not (alist-get 'ok
+                                 (json-parse-string (doclive--wiki-open "wiki" path)
+                                                    :object-type 'alist
+                                                    :false-object nil)))))))))
+
+(ert-deftest doclive-test-xwidget-bridge-validates-url-and-ownership ()
+  (doclive-test--with-trusted-xwidget
+    (dolist (url '("http://127.0.0.1:39123/preview"
+                   "http://127.0.0.1:39123/preview?id=page"
+                   "http://127.0.0.1:39123/preview#heading"))
+      (cl-letf (((symbol-function 'xwidget-webkit-uri) (lambda (_widget) url)))
+        (should (equal (doclive--xwidget-bridge-origin 'fake-xwidget (current-buffer))
+                       "http://127.0.0.1:39123"))))
+    (should-error (doclive--xwidget-bridge-origin 'other-widget (current-buffer))
+                  :type 'user-error)
+    (with-temp-buffer
+      (should-error (doclive--xwidget-bridge-origin 'fake-xwidget (current-buffer))
+                    :type 'user-error))
+    (let ((doclive--server-token "rotated-token"))
+      (should-error (doclive--xwidget-bridge-origin 'fake-xwidget (current-buffer))
+                    :type 'user-error))
+    (let ((doclive--server-token nil))
+      (should-error (doclive--xwidget-bridge-origin 'fake-xwidget (current-buffer))
+                    :type 'user-error))
+    (clrhash doclive--buffers)
+    (should-error (doclive--xwidget-bridge-origin 'fake-xwidget (current-buffer))
+                  :type 'user-error)))
+
+(ert-deftest doclive-test-xwidget-commands-reject-external-pages ()
+  (doclive-test--with-trusted-xwidget
+    (let ((kill-ring '("private clipboard")))
+      (cl-letf (((symbol-function 'xwidget-webkit-execute-script)
+                 (lambda (&rest _) (ert-fail "Script sent to an untrusted page")))
+                ((symbol-function 'read-from-minibuffer)
+                 (lambda (&rest _) (ert-fail "Untrusted page opened search"))))
+        (dolist (url '("https://external.invalid/preview"
+                       "http://127.0.0.1:39124/preview"
+                       "https://127.0.0.1:39123/preview"
+                       "http://127.0.0.1:39123@external.invalid/preview"
+                       "http://127.0.0.1:39123/preview-other"
+                       "http://127.0.0.1:39123/preview/"
+                       "http://127.0.0.1:39123/asset"
+                       "about:blank" nil))
+          (cl-letf (((symbol-function 'xwidget-webkit-uri) (lambda (_widget) url)))
+            (dolist (command '(doclive-xwidget-search doclive-xwidget-search-backward
+                               doclive-xwidget-wiki-search doclive-xwidget-yank-to-search
+                               doclive-xwidget-copy-selection doclive-xwidget-dismiss
+                               doclive-xwidget-back doclive-xwidget-forward))
+              (should-error (funcall command) :type 'user-error)))))
+      (should (equal kill-ring '("private clipboard"))))))
+
+(ert-deftest doclive-test-xwidget-trusted-search-sends-incremental-text ()
+  (dolist (kind '(page backward wiki))
+    (doclive-test--with-trusted-xwidget
+      (setq doclive--xwidget-search-text "initial"
+            doclive--xwidget-wiki-search-text "initial")
+      (let (scripts)
+        (cl-letf (((symbol-function 'xwidget-webkit-execute-script)
+                   (lambda (_widget script &optional callback)
+                     (if callback (funcall callback "initial")
+                       (push script scripts))))
+                  ((symbol-function 'read-from-minibuffer)
+                   (lambda (_prompt initial &rest _)
+                     (should (equal initial "initial"))
+                     (with-temp-buffer
+                       (insert initial)
+                       (run-hooks 'minibuffer-setup-hook)
+                       (erase-buffer)
+                       (insert "next\"\ntext")
+                       (run-hooks 'post-command-hook)
+                       (run-hooks 'post-command-hook)
+                       (buffer-string)))))
+          (doclive--xwidget-search (eq kind 'wiki) (eq kind 'backward)))
+        (setq scripts (nreverse scripts))
+        (should (= (length scripts) (if (eq kind 'backward) 3 2)))
+        (let ((function (if (eq kind 'wiki) "docliveSetWikiSearch" "docliveSetSearch")))
+          (should (string-search (concat function "(\"initial\")") (car scripts)))
+          (should (string-search (concat function "(\"next\\\"\\ntext\")")
+                                 (car (last scripts)))))
+        (when (eq kind 'backward)
+          (should (string-search "docliveSearchNext(true)" (cadr scripts))))
+        (dolist (script scripts)
+          (should (string-prefix-p
+                   "(()=>{if(window.location.origin!==\"http://127.0.0.1:39123\"||window.location.pathname!=='/preview')return null;return "
+                   script)))
+        (should (equal (if (eq kind 'wiki) doclive--xwidget-wiki-search-text
+                         doclive--xwidget-search-text)
+                       "next\"\ntext"))))))
+
+(ert-deftest doclive-test-xwidget-search-rechecks-location-after-navigation ()
+  (doclive-test--with-trusted-xwidget
+    (let ((url "http://127.0.0.1:39123/preview")
+          scripts)
+      (setq doclive--xwidget-search-text "initial")
+      (cl-letf (((symbol-function 'xwidget-webkit-uri) (lambda (_widget) url))
+                ((symbol-function 'xwidget-webkit-execute-script)
+                 (lambda (_widget script &optional callback)
+                   (if callback (funcall callback "initial")
+                     (push script scripts))))
+                ((symbol-function 'read-from-minibuffer)
+                 (lambda (_prompt initial &rest _)
+                   (with-temp-buffer
+                     (insert initial)
+                     (run-hooks 'minibuffer-setup-hook)
+                     (should (= (length scripts) 1))
+                     (setq url "https://external.invalid/preview")
+                     (erase-buffer)
+                     (insert "private next query")
+                     (run-hooks 'post-command-hook)
+                     (buffer-string)))))
+        (should-error (doclive-xwidget-search) :type 'user-error))
+      (should (= (length scripts) 1))
+      (should (string-search "docliveSetSearch(\"initial\")" (car scripts)))
+      (should-not (string-search "private next query" (car scripts)))
+      (should (equal doclive--xwidget-search-text "initial")))))
+
+(ert-deftest doclive-test-xwidget-search-uses-visible-query ()
+  (dolist (wiki '(nil t))
+    (dolist (visible '("画面の検索語" ""))
+      (doclive-test--with-trusted-xwidget
+        (setq doclive--xwidget-search-text "stale"
+              doclive--xwidget-wiki-search-text "stale")
+        (let (callback opened scripts)
+          (cl-letf (((symbol-function 'xwidget-webkit-execute-script)
+                     (lambda (_widget script &optional result-handler)
+                       (push script scripts)
+                       (when result-handler (setq callback result-handler))))
+                    ((symbol-function 'read-from-minibuffer)
+                     (lambda (_prompt initial &rest _)
+                       (push initial opened)
+                       initial)))
+            (doclive--xwidget-search wiki nil)
+            (should-not opened)
+            (should (functionp callback))
+            (should (string-search
+                     (format "docliveGetSearch(%s)" (if wiki "true" "false"))
+                     (car scripts)))
+            (funcall callback visible)
+            (should (equal opened (list visible)))))))))
+
+(ert-deftest doclive-test-xwidget-search-ignores-late-response ()
+  (dolist (reason '(dismiss superseded buffer minibuffer unavailable))
+    (doclive-test--with-trusted-xwidget
+      (let (callbacks opened)
+        (cl-letf (((symbol-function 'xwidget-webkit-execute-script)
+                   (lambda (_widget _script &optional callback)
+                     (when callback (push callback callbacks))))
+                  ((symbol-function 'read-from-minibuffer)
+                   (lambda (_prompt initial &rest _)
+                     (push initial opened) initial)))
+          (doclive-xwidget-search)
+          (should (= (length callbacks) 1))
+          (let ((callback (car callbacks)))
+            (pcase reason
+              ('dismiss (doclive-xwidget-dismiss) (funcall callback "late"))
+              ('superseded
+               (doclive-xwidget-wiki-search)
+               (should (= (length callbacks) 2))
+               (funcall callback "late")
+               (should-not opened)
+               (funcall (car callbacks) "current")
+               (should (equal opened '("current")))
+               (setq opened nil))
+              ('buffer
+               (save-window-excursion
+                 (set-window-buffer (selected-window) (current-buffer))
+                 (funcall callback "late")))
+              ('minibuffer
+               (cl-letf (((symbol-function 'active-minibuffer-window)
+                          (lambda () (selected-window))))
+                 (funcall callback "late")))
+              ('unavailable (funcall callback nil)))
+            (should-not opened)
+            (funcall callback "duplicate")
+            (should-not opened)))))))
+
+(ert-deftest doclive-test-xwidget-search-quit-restores-visible-query ()
+  (doclive-test--with-trusted-xwidget
+    (setq doclive--xwidget-search-text "stale")
+    (let (scripts)
+      (cl-letf (((symbol-function 'xwidget-webkit-execute-script)
+                 (lambda (_widget script &optional callback)
+                   (if callback (funcall callback "visible")
+                     (push script scripts))))
+                ((symbol-function 'read-from-minibuffer)
+                 (lambda (&rest _) (signal 'quit nil))))
+        (doclive-xwidget-search))
+      (should (= (length scripts) 1))
+      (should (string-search "docliveSetSearch(\"visible\")" (car scripts))))))
 
 ;;; doclive-test.el ends here

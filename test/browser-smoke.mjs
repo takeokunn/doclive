@@ -92,20 +92,62 @@ const assets = new Map([
 ]);
 
 const openStreams = new Set();
+const wikiPages = new Map([
+  ["wiki-home", { path: "README.md", name: "Handbook", markdown: "# Handbook\n\nChoose a guide from the explorer.\n" }],
+  ["wiki-storage", { path: "reference/storage.md", name: "Storage", markdown: "# Storage\n\n設定の変更は再起動なしで反映されます。\n" }],
+]);
+const wikiState = { bookmarks: [], recent: ["README.md"], pins: [], theme: "dark", zoom: 1 };
+const copiedTexts = [];
+const openedPaths = [];
 const server = createServer((request, response) => {
   const url = new URL(request.url, "http://127.0.0.1");
+  const wikiPage = wikiPages.get(url.searchParams.get("id"));
   if (url.pathname === "/") {
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     response.end(htmlResult.stdout);
   } else if (url.pathname === "/content") {
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({
+    response.end(JSON.stringify(wikiPage ? {
+      ok: true, revision: 1, name: wikiPage.path, contentKind: "markdown", markdown: wikiPage.markdown,
+    } : {
       ok: true,
       revision: 1,
       name: "browser-smoke.md",
       contentKind: "markdown",
       markdown: "# Browser Smoke\n\nNeedle alpha and needle beta.\n\nThis line wraps\ninto a second line.\n\n| Col A | Col B |\n| --- | --- |\n| one | two |\n\n- [ ] Todo item\n\n```js\nconst greeting = 'hi';\n```\n\n```mermaid\ngraph TD; A-->B;\n```\n",
     }));
+  } else if (url.pathname === "/copy") {
+    copiedTexts.push(JSON.parse(url.searchParams.get("text")));
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: true }));
+  } else if (url.pathname === "/workspace") {
+    for (const key of ["theme", "zoom", "pins"]) {
+      if (!url.searchParams.has(key)) continue;
+      const value = url.searchParams.get(key);
+      wikiState[key] = key === "zoom" ? Number(value) : key === "pins" ? JSON.parse(value) : value;
+    }
+    if (url.searchParams.has("bookmark")) {
+      const path = url.searchParams.get("bookmark");
+      wikiState.bookmarks = wikiState.bookmarks.filter((item) => item !== path);
+      if (url.searchParams.get("value") === "1") wikiState.bookmarks.push(path);
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(wikiPage ? {
+      ok: true, workspace: true, name: "handbook", current: wikiPage.path,
+      files: [...wikiPages.values()].map(({ path, name }) => ({ path, name })), ...wikiState,
+    } : { ok: true, workspace: false }));
+  } else if (url.pathname === "/search") {
+    const query = url.searchParams.get("q") || "";
+    const results = [...wikiPages.values()].filter((page) => query && page.markdown.includes(query))
+      .map(({ path, name, markdown }) => ({ path, name, snippet: markdown }));
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: true, results }));
+  } else if (url.pathname === "/open") {
+    openedPaths.push(url.searchParams.get("path"));
+    const found = [...wikiPages].find(([, page]) => page.path === url.searchParams.get("path"));
+    if (found) wikiState.recent = [found[1].path, ...wikiState.recent.filter((path) => path !== found[1].path)];
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(found ? { ok: true, buffer_id: found[0] } : { ok: false, error: "Missing page" }));
   } else if (url.pathname === "/events") {
     response.writeHead(200, {
       "cache-control": "no-cache",
@@ -269,14 +311,109 @@ try {
 
   await evaluate("window.docliveSetSearch('needle');");
   assert(await evaluate("document.querySelectorAll('#md mark').length >= 2"), "docliveSetSearch did not highlight matches");
+  assert(await evaluate("window.docliveSearchNext(false).index === 2"), "next match did not advance");
+  assert(await evaluate("window.docliveSearchNext(true).index === 1"), "previous match did not return");
+  assert(await evaluate("(()=>{search.focus();search.value='検索テキスト';search.setSelectionRange(0,2);return window.docliveGetSelection()==='検索';})()"), "input selection was not copied");
+  assert(await evaluate("window.docliveGetSearch(false)==='検索テキスト'"), "native search did not read the visible page query");
+  assert(await evaluate("(()=>{window.doclivePaste('needle');return search.value==='needleテキスト'&&search.selectionStart===6&&document.activeElement===search;})()"), "paste did not replace the focused search selection");
+  assert(await evaluate("(()=>{search.value='nee';search.setSelectionRange(3,3);window.doclivePaste('dle');return search.value==='needle'&&document.querySelectorAll('#md .search-match').length>=2;})()"), "paste did not update page matches");
+  assert(await evaluate("(()=>{search.blur();window.doclivePaste('needle');return search.value==='needle'&&document.activeElement===search;})()"), "paste without an input did not focus page search");
+  assert(await evaluate("(()=>{search.blur();const r=document.createRange();r.selectNodeContents(document.querySelector('#md h1'));const s=getSelection();s.removeAllRanges();s.addRange(r);return window.docliveGetSelection()==='Browser Smoke';})()"), "body selection was not copied");
 
   await evaluate("Object.defineProperty(navigator,'clipboard',{value:undefined,configurable:true}); document.execCommand=(cmd)=>{globalThis.execCalls=(globalThis.execCalls||[]).concat(cmd); return cmd==='copy';};");
   await evaluate("document.querySelector('.copy-btn').click();");
   await waitFor("document.querySelector('.copy-btn').textContent==='Copied'", "copy button fallback result");
   assert(await evaluate("Array.isArray(globalThis.execCalls) && globalThis.execCalls.includes('copy')"), "copy fallback did not invoke execCommand('copy')");
+  assert(copiedTexts.includes("const greeting = 'hi';"), "code Copy did not send its text to the native bridge");
+
+  await command("Page.navigate", { url: `http://127.0.0.1:${port}/?id=wiki-home` }, sessionId);
+  await waitFor("document.querySelectorAll('#wiki-files .wiki-page').length === 2", "Wiki explorer");
+  await evaluate("(()=>{const toggle=document.getElementById('wiki-toggle');if(toggle.getAttribute('aria-expanded')==='false')toggle.click();})()");
+  assert(await evaluate("(()=>{const input=document.getElementById('wiki-search');input.focus();return document.activeElement===input;})()"), "Wiki paste precondition: search input did not receive focus");
+  await evaluate("(()=>{const input=document.getElementById('wiki-search');input.focus();input.value='再xx';input.setSelectionRange(1,3);window.doclivePaste('起動');})()");
+  await waitFor("document.querySelectorAll('#wiki-results .wiki-page').length === 1", "pasted Wiki search");
+  assert(await evaluate("document.getElementById('wiki-search').value==='再起動'&&document.getElementById('search').value===''") , "Wiki paste changed the wrong search input");
+  assert(await evaluate("window.docliveGetSearch(true)==='再起動'&&window.docliveGetSearch(false)===''"), "native search did not distinguish Wiki and empty page queries");
+  await evaluate("window.docliveSetWikiSearch('')");
+  await waitFor("!document.getElementById('wiki-files').hidden && document.getElementById('wiki-results').hidden && document.querySelectorAll('#wiki-files .wiki-page').length === 2", "Wiki search cleared after paste");
+  assert(await evaluate("document.querySelector('#wiki-path').textContent === 'README.md'"), "Wiki did not open its README");
+  await evaluate("document.querySelector('#wiki-bookmark').click()");
+  await waitFor("document.querySelector('#wiki-bookmark').getAttribute('aria-pressed') === 'true'", "bookmark save");
+  await evaluate("document.querySelector('[data-filter=bookmarks]').click()");
+  assert(await evaluate("document.querySelectorAll('#wiki-files .wiki-page').length === 1"), "Saved filter did not narrow pages");
+  await evaluate("document.querySelector('[data-filter=all]').click(); document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true}));");
+  assert(await evaluate("document.activeElement.id === 'wiki-search'"), "search shortcut did not move focus");
+  await evaluate("const ws=document.querySelector('#wiki-search'); ws.value='再起動'; ws.dispatchEvent(new Event('input'));");
+  await waitFor("document.querySelectorAll('#wiki-results .wiki-page').length === 1", "Japanese body search");
+  assert(await evaluate("document.querySelector('#wiki-results .snippet').textContent.includes('再起動')"), "search result did not include its matching context");
+  const opensBeforeComposition = openedPaths.length;
+  for (const composition of [{ isComposing: true }, { isComposing: false, keyCode: 229 }]) {
+    const label = JSON.stringify(composition);
+    for (const key of ["Enter", "ArrowDown", "ArrowUp", "Escape"]) {
+      const state = await evaluate(`(()=>{
+        const input=document.querySelector('#wiki-search');
+        const beforeUrl=location.href;
+        const event=new KeyboardEvent('keydown',${JSON.stringify({ bubbles: true, cancelable: true, key, ...composition })});
+        input.dispatchEvent(event);
+        return {
+          isComposing:event.isComposing,keyCode:event.keyCode,
+          prevented:event.defaultPrevented,focused:document.activeElement===input,
+          query:input.value,expanded:document.querySelector('#wiki-toggle').getAttribute('aria-expanded'),
+          closed:document.body.classList.contains('explorer-closed'),
+          busy:document.querySelector('#md').hasAttribute('aria-busy'),
+          sameUrl:location.href===beforeUrl,path:document.querySelector('#wiki-path').textContent
+        };
+      })()`);
+      assert(state.isComposing === composition.isComposing && state.keyCode === (composition.keyCode || 0), `composition event precondition failed: ${label}`);
+      assert(!state.busy && state.sameUrl && state.path === "README.md", `composing ${key} initiated navigation: ${label} ${JSON.stringify(state)}`);
+      assert(!state.prevented && state.focused, `composing ${key} prevented default or moved focus: ${label}`);
+      assert(state.query === "再起動" && state.expanded === "true" && !state.closed, `composing ${key} changed query or explorer: ${label}`);
+      assert(openedPaths.length === opensBeforeComposition, `composing ${key} initiated /open: ${label}`);
+    }
+  }
+  await evaluate("document.querySelector('#wiki-search').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))");
+  await waitFor("document.querySelector('#wiki-path').textContent === 'reference/storage.md'", "search result navigation");
+  assert(await evaluate("document.querySelector('#md h1').textContent === 'Storage'"), "selected page content was not loaded");
+  assert(openedPaths.length === opensBeforeComposition + 1 && openedPaths.at(-1) === "reference/storage.md", "ordinary Enter did not make exactly one /open request after composition");
+  await evaluate("history.back()");
+  await waitFor("document.querySelector('#wiki-path').textContent === 'README.md'", "browser back navigation");
+  await evaluate("history.forward()");
+  await waitFor("document.querySelector('#wiki-path').textContent === 'reference/storage.md'", "browser forward navigation");
+  await evaluate("theme.value='light'; theme.dispatchEvent(new Event('change')); document.querySelector('#zoom-in').click(); search.value='再起動'; search.dispatchEvent(new Event('input')); pin.click();");
+  await waitFor("document.querySelector('#chips .chip b')?.textContent === '再起動'", "Wiki search pin");
+  const savedDeadline = Date.now() + 10000;
+  while (wikiState.theme !== "light" || wikiState.zoom !== 1.1 || wikiState.pins[0] !== "再起動") {
+    assert(Date.now() < savedDeadline, "Wiki preferences were not saved to the server");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  await command("Page.reload", {}, sessionId);
+  await waitFor("document.querySelector('#wiki-path')?.textContent === 'reference/storage.md' && document.body.dataset.theme === 'light'", "Wiki preference restoration");
+  assert(await evaluate("document.querySelector('#md').style.fontSize === '110%' && document.querySelector('#chips .chip b')?.textContent === '再起動'"), "Wiki zoom or pins were not restored");
+  await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true }, sessionId);
+  await command("Page.reload", {}, sessionId);
+  await waitFor("document.querySelector('#wiki-path')?.textContent === 'reference/storage.md'", "narrow Wiki layout");
+  assert(await evaluate("document.documentElement.scrollWidth <= innerWidth"), "narrow Wiki layout overflowed horizontally");
+  assert(await evaluate("document.body.classList.contains('explorer-closed')"), "narrow Wiki did not start with the explorer closed");
+  await evaluate("document.querySelector('#wiki-toggle').click()");
+  assert(await evaluate("document.activeElement.id === 'wiki-search' && document.querySelector('#wiki-toggle').getAttribute('aria-expanded') === 'true'"), "narrow explorer did not open with search focus");
+  for (const composition of [{ isComposing: true }, { isComposing: false, keyCode: 229 }]) {
+    assert(await evaluate(`(()=>{
+      const input=document.querySelector('#wiki-search');
+      const event=new KeyboardEvent('keydown',${JSON.stringify({ key: "Escape", bubbles: true, cancelable: true, ...composition })});
+      input.dispatchEvent(event);
+      return !event.defaultPrevented && document.activeElement===input && input.value==='' &&
+        document.querySelector('#wiki-toggle').getAttribute('aria-expanded')==='true' && !document.body.classList.contains('explorer-closed');
+    })()`), `composing Escape closed the empty-query explorer: ${JSON.stringify(composition)}`);
+  }
+  await evaluate("document.querySelector('#wiki-search').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
+  assert(await evaluate("document.activeElement.id === 'wiki-toggle' && document.body.classList.contains('explorer-closed')"), "Escape did not close the explorer and return focus");
+  assert(await evaluate("window.docliveSetWikiSearch('再起動')"), "xwidget Wiki search bridge did not accept text");
+  await waitFor("document.querySelectorAll('#wiki-results .wiki-page').length === 1", "native Wiki search results");
+  await evaluate("window.docliveSetSearch('再起動');window.docliveDismiss()");
+  assert(await evaluate("search.value === '' && document.querySelector('#wiki-search').value === '' && document.body.classList.contains('explorer-closed')"), "native dismiss did not clear search and close the explorer");
 
   assert(browserErrors.length === 0, `browser console errors:\n${browserErrors.join("\n")}`);
-  process.stdout.write("browser smoke passed: render, status, search/pin, theme, zoom, marked options, title, table wrap, task list, mermaid overlay/fit/expand/close/focus, docliveSetSearch, copy fallback\n");
+  process.stdout.write("browser smoke passed: rendering, search/navigation, theme/zoom, Mermaid, selection/copy bridge, Wiki search/bookmarks/history/preferences, narrow layout and focus\n");
 } finally {
   socket.close();
   for (const stream of openStreams) stream.end();

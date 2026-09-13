@@ -5,7 +5,7 @@
 ;; Author: takeokunn <bararararatty@gmail.com>
 ;; Maintainer: takeokunn <bararararatty@gmail.com>
 ;; URL: https://github.com/takeokunn/doclive
-;; Version: 1.3.0
+;; Version: 1.4.0
 ;; Keywords: markdown org tools convenience
 ;; Package-Requires: ((emacs "29.1"))
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -84,8 +84,10 @@
 (require 'url-util)
 
 (declare-function xwidget-webkit-new-session "xwidget" (url))
+(declare-function xwidget-webkit-pass-command-event "xwidget" ())
 (declare-function xwidget-webkit-execute-script "xwidget.c" (xwidget script &optional callback))
 (declare-function xwidget-webkit-goto-uri "xwidget.c" (xwidget uri))
+(declare-function xwidget-webkit-uri "xwidget.c" (xwidget))
 (declare-function xwidget-webkit-current-session "xwidget" ())
 (declare-function xwidget-webkit-adjust-size-to-window "xwidget" (xwidget &optional window))
 (declare-function get-buffer-xwidgets "xwidget.c" (buffer))
@@ -156,15 +158,45 @@ The default uses xwidget WebKit when available and falls back to
   :package-version '(doclive . "1.3.0")
   :group 'doclive)
 
+(defvar doclive--buffers)
+(defvar doclive--server-token)
+
+(defun doclive--xwidget-bridge-origin (widget buffer)
+  "Validate WIDGET ownership and preview location in BUFFER, returning its origin."
+  (let ((origin (format "http://%s:%d" (doclive--url-host doclive-host) doclive-port))
+        owned)
+    (when (and widget (buffer-live-p buffer) doclive--server-token
+               (memq widget (get-buffer-xwidgets buffer)))
+      (maphash (lambda (_id entry)
+                 (when (and (eq (plist-get entry :xwidget-buffer) buffer)
+                            (equal (plist-get entry :xwidget-token) doclive--server-token))
+                   (setq owned t)))
+               doclive--buffers))
+    (unless (and owned
+                 (string-match-p
+                  (concat "\\`" (regexp-quote origin) "/preview\\(?:[?#]\\|\\'\\)")
+                  (or (xwidget-webkit-uri widget) "")))
+      (user-error "Not an owned doclive preview; reopen the document preview"))
+    origin))
+
+(defun doclive--xwidget-execute (widget buffer script &optional callback)
+  "Run SCRIPT only in BUFFER's owned preview WIDGET, with CALLBACK."
+  (let ((origin (doclive--xwidget-bridge-origin widget buffer)))
+    (xwidget-webkit-execute-script
+     widget
+     (format "(()=>{if(window.location.origin!==%s||window.location.pathname!=='/preview')return null;return %s})()"
+             (json-encode-string origin) script)
+     callback)))
+
 (defun doclive-xwidget-copy-selection ()
   "Copy the active xwidget preview's text selection to the kill ring."
   (interactive)
   (let ((xwidget (xwidget-webkit-current-session)))
     (unless xwidget
       (user-error "No active doclive xwidget preview"))
-    (xwidget-webkit-execute-script
-     xwidget
-     "window.getSelection().toString();"
+    (doclive--xwidget-execute
+     xwidget (current-buffer)
+     "window.docliveGetSelection?window.docliveGetSelection():window.getSelection().toString();"
      (lambda (result)
        (if (and (stringp result) (not (string-empty-p result)))
            (progn
@@ -181,28 +213,158 @@ script it is embedded in."
     (replace-regexp-in-string " " "\\u2029" s t t)))
 
 (defun doclive-xwidget-yank-to-search ()
-  "Send the most recent `kill-ring' entry to the preview page search box."
+  "Paste the latest kill into the focused input, or start a page search."
   (interactive)
   (let ((xwidget (xwidget-webkit-current-session)))
     (unless xwidget
       (user-error "No active doclive xwidget preview"))
     (unless kill-ring
       (user-error "Kill ring is empty"))
-    (xwidget-webkit-execute-script
-     xwidget
-     (format "window.docliveSetSearch(%s);"
-             (doclive--json-escape-line-separators (json-encode-string (current-kill 0))))))
-  (message "doclive preview search updated"))
+    (doclive--xwidget-execute
+     xwidget (current-buffer)
+     (format "window.doclivePaste(%s)?'pasted':'rejected';"
+             (doclive--json-escape-line-separators (json-encode-string (current-kill 0))))
+     (lambda (result)
+       (message
+        (cond ((equal result "pasted") "Pasted into doclive preview")
+              ((equal result "rejected") "Cannot paste into this preview input")
+              (t "Paste unavailable: preview changed or is not ready")))))))
+
+(defvar doclive--xwidget-search-history nil)
+(defvar-local doclive--xwidget-search-text "")
+(defvar-local doclive--xwidget-wiki-search-text "")
+(defvar-local doclive--xwidget-search-request nil)
+
+(defun doclive--xwidget-search (wiki backward)
+  "Read a native search for WIKI or the current page, optionally BACKWARD."
+  (let* ((widget (xwidget-webkit-current-session))
+         (origin (current-buffer))
+         (window (selected-window))
+         (displayed (window-buffer window))
+         (request (make-symbol "doclive-search")))
+    (setq doclive--xwidget-search-request request)
+    (doclive--xwidget-execute
+     widget origin (format "window.docliveGetSearch(%s);" (if wiki "true" "false"))
+     (lambda (initial)
+       (when (buffer-live-p origin)
+         (with-current-buffer origin
+           (when (eq request doclive--xwidget-search-request)
+             (setq doclive--xwidget-search-request nil)
+             (when (and (eq window (selected-window))
+                        (eq displayed (window-buffer window))
+                        (not (active-minibuffer-window)))
+               (if (stringp initial)
+                   (doclive--xwidget-read-search widget origin wiki backward initial)
+                 (message "Search unavailable: preview changed or is not ready"))))))))))
+
+(defun doclive--xwidget-read-search (widget origin wiki backward initial)
+  "Search WIDGET in ORIGIN from INITIAL, using WIKI and BACKWARD options."
+  (let* ((last-text nil)
+         (map (copy-keymap minibuffer-local-map)))
+    (doclive--xwidget-bridge-origin widget origin)
+    (cl-labels
+        ((send (text)
+           (doclive--xwidget-execute
+            widget origin (format "window.%s(%s);"
+                           (if wiki "docliveSetWikiSearch" "docliveSetSearch")
+                           (doclive--json-escape-line-separators
+                            (json-encode-string text)))))
+         (update ()
+           (let ((text (minibuffer-contents-no-properties)))
+             (unless (equal text last-text)
+               (setq last-text text)
+               (send text))))
+         (step (reverse)
+           (doclive--xwidget-execute
+            widget origin (format "window.docliveSearchNext(%s);"
+                           (if reverse "true" "false")))))
+      (unless wiki
+        (define-key map (kbd "C-s") (lambda () (interactive) (step nil)))
+        (define-key map (kbd "C-r") (lambda () (interactive) (step t))))
+      (condition-case nil
+          (let ((text
+                 (minibuffer-with-setup-hook
+                     (lambda ()
+                       (add-hook 'post-command-hook #'update nil t)
+                       (update)
+                       (when backward (step t)))
+                   (read-from-minibuffer
+                    (if wiki "Wiki search: " "Preview search: ")
+                    initial map nil 'doclive--xwidget-search-history))))
+            (when (buffer-live-p origin)
+              (with-current-buffer origin
+                (if wiki (setq doclive--xwidget-wiki-search-text text)
+                  (setq doclive--xwidget-search-text text)))))
+        (quit (send initial))))))
+
+(defun doclive-xwidget-search ()
+  "Search the preview incrementally from the Emacs minibuffer."
+  (interactive)
+  (doclive--xwidget-search nil nil))
+
+(defun doclive-xwidget-search-backward ()
+  "Search backward in the preview from the Emacs minibuffer."
+  (interactive)
+  (doclive--xwidget-search nil t))
+
+(defun doclive-xwidget-wiki-search ()
+  "Search the Wiki workspace from the Emacs minibuffer."
+  (interactive)
+  (doclive--xwidget-search t nil))
+
+(defun doclive--xwidget-command (script)
+  "Run SCRIPT in the active preview."
+  (let ((widget (xwidget-webkit-current-session)))
+    (unless widget (user-error "No active doclive xwidget preview"))
+    (doclive--xwidget-execute widget (current-buffer) script)))
+
+(defun doclive-xwidget-dismiss ()
+  "Dismiss preview search and open panels."
+  (interactive)
+  (setq doclive--xwidget-search-request nil
+        doclive--xwidget-search-text "" doclive--xwidget-wiki-search-text "")
+  (doclive--xwidget-command "window.docliveDismiss();"))
+
+(defun doclive-xwidget-back ()
+  "Go back in preview navigation history."
+  (interactive)
+  (doclive--xwidget-command "history.back();"))
+
+(defun doclive-xwidget-forward ()
+  "Go forward in preview navigation history."
+  (interactive)
+  (doclive--xwidget-command "history.forward();"))
 
 (define-minor-mode doclive-xwidget-preview-mode
   "Minor mode active in a doclive xwidget preview buffer.
 Remaps copy and yank commands to operate on the previewed page's
-selection and search box instead of ordinary buffer text."
+selection and search box instead of ordinary buffer text.
+Typing and editing keys go directly to WebKit's focused element."
   :lighter " doclive"
   :keymap (let ((map (make-sparse-keymap)))
+            (substitute-key-definition 'self-insert-command
+                                       'xwidget-webkit-pass-command-event map global-map)
+            (define-key map [remap self-insert-command] #'xwidget-webkit-pass-command-event)
+            (dolist (key '("RET" "TAB" "DEL" "<backspace>" "<tab>" "<return>"
+                           "<left>" "<right>" "<up>" "<down>"
+                           "C-<left>" "C-<right>" "C-<up>" "C-<down>" "C-<return>"
+                           "S-<left>" "S-<right>" "S-<up>" "S-<down>" "S-<return>"
+                           "M-<left>" "M-<right>" "M-<up>" "M-<down>" "M-<return>"
+                           "C-<backspace>" "<delete>" "<backtab>"))
+              (define-key map (kbd key) #'xwidget-webkit-pass-command-event))
             (define-key map [remap kill-ring-save] #'doclive-xwidget-copy-selection)
             (define-key map [remap ns-copy-including-secondary] #'doclive-xwidget-copy-selection)
             (define-key map [remap yank] #'doclive-xwidget-yank-to-search)
+            (dolist (key '("C-s" "s-f"))
+              (define-key map (kbd key) #'doclive-xwidget-search))
+            (define-key map (kbd "C-r") #'doclive-xwidget-search-backward)
+            (define-key map (kbd "s-k") #'doclive-xwidget-wiki-search)
+            (dolist (key '("s-c" "M-w"))
+              (define-key map (kbd key) #'doclive-xwidget-copy-selection))
+            (define-key map (kbd "C-y") #'doclive-xwidget-yank-to-search)
+            (define-key map (kbd "<escape>") #'doclive-xwidget-dismiss)
+            (define-key map (kbd "M-<left>") #'doclive-xwidget-back)
+            (define-key map (kbd "M-<right>") #'doclive-xwidget-forward)
             map))
 
 (defcustom doclive-change-debounce-ms 150
@@ -246,6 +408,22 @@ they resolve under the current document's directory."
   :type 'boolean
   :package-version '(doclive . "1.2.0")
   :group 'doclive)
+
+(defcustom doclive-wiki-state-file
+  (locate-user-emacs-file "doclive-wiki.json")
+  "File for recent Wiki roots, bookmarks and reading preferences.
+Set to nil to keep this state only for the current Emacs session."
+  :type '(choice (const :tag "Do not save" nil) file)
+  :group 'doclive)
+
+(defvar doclive--wiki-state nil
+  "Persisted Wiki state as an alist.")
+
+(defvar doclive--wiki-state-loaded nil
+  "Whether Wiki state has been loaded in this session.")
+
+(defvar-local doclive--wiki-root nil
+  "Canonical Wiki root associated with this preview buffer.")
 
 (defvar doclive--server nil
   "The doclive HTTP server process.")
@@ -646,6 +824,7 @@ fall back to openssl rand where /dev/urandom is unavailable."
     (setf (plist-get entry :buffer) buffer)
     (setf (plist-get entry :name) (buffer-name buffer))
     (setf (plist-get entry :file) (buffer-local-value 'buffer-file-name buffer))
+    (setf (plist-get entry :wiki-root) (buffer-local-value 'doclive--wiki-root buffer))
     (setf (plist-get entry :xwidget-buffer) (buffer-local-value 'doclive--xwidget-buffer buffer))
     (setf (plist-get entry :xwidget-token) (buffer-local-value 'doclive--xwidget-token buffer))
     (doclive--put-entry id entry)
@@ -863,6 +1042,23 @@ Return nil when VALUE is not valid percent-encoded data."
   (or doclive-allow-linked-document-parent-directory
       (doclive--file-in-directory-p file directory)))
 
+(defconst doclive--wiki-excluded-directories
+  '(".git" ".svn" "node_modules" ".cache"))
+
+(defun doclive--wiki-path-allowed-p (file root)
+  "Return non-nil when FILE resolves inside ROOT outside excluded directories."
+  (condition-case nil
+      (let* ((root (file-name-as-directory (file-truename root)))
+             (file (file-truename file))
+             (ignore-case (file-name-case-insensitive-p file)))
+        (and (string-prefix-p root file ignore-case)
+             (not (cl-intersection
+                   (split-string (if ignore-case
+                                     (downcase (file-relative-name file root))
+                                   (file-relative-name file root)) "/" t)
+                   doclive--wiki-excluded-directories :test #'equal))))
+    (file-error nil)))
+
 (defun doclive--route-matches-p (path route)
   "Return non-nil when PATH matches ROUTE exactly or with a query string."
   (or (equal path route)
@@ -874,17 +1070,20 @@ Return nil when VALUE is not valid percent-encoded data."
                       (doclive--strip-link-target rel)))
          (base (plist-get entry :file))
          (dir (and base (file-name-directory base)))
+         (root (plist-get entry :wiki-root))
          (full (and target dir (expand-file-name target dir))))
     (cond
      ((not full) nil)
      ((and (doclive--previewable-document-file-p full)
-           (doclive--linked-document-allowed-p full dir))
+           (if root (doclive--wiki-path-allowed-p full root)
+             (doclive--linked-document-allowed-p full dir)))
       full)
      ((string= (downcase (or (file-name-extension full) "")) "html")
       (cl-loop for ext in '("org" "md")
                for candidate = (concat (file-name-sans-extension full) "." ext)
                when (and (doclive--previewable-document-file-p candidate)
-                         (doclive--linked-document-allowed-p candidate dir))
+                         (if root (doclive--wiki-path-allowed-p candidate root)
+                           (doclive--linked-document-allowed-p candidate dir)))
                return candidate))
      (t nil))))
 
@@ -902,14 +1101,213 @@ Return nil when VALUE is not valid percent-encoded data."
         (let* ((buf (find-file-noselect full))
                (new-entry
                 (with-current-buffer buf
+                  (setq doclive--wiki-root (plist-get entry :wiki-root))
                   (if doclive-preview-mode
                       (doclive--snapshot-buffer buf)
                     (doclive-preview-mode 1)
                     (doclive--get-entry (doclive--buffer-id buf)))))
                (new-id (plist-get new-entry :id)))
+          (when (plist-get entry :wiki-root)
+            (doclive--wiki-remember-page (plist-get entry :wiki-root) full))
           (json-encode `((ok . t)
                          (buffer_id . ,new-id)
                          (name . ,(plist-get new-entry :name)))))))))
+
+(defun doclive--wiki-load-state ()
+  "Load reading state without evaluating Lisp or changing document buffers."
+  (unless doclive--wiki-state-loaded
+    (setq doclive--wiki-state-loaded t)
+    (when (and doclive-wiki-state-file
+               (file-readable-p doclive-wiki-state-file))
+      (condition-case nil
+          (with-temp-buffer
+            (insert-file-contents doclive-wiki-state-file)
+            (setq doclive--wiki-state
+                  (json-parse-buffer :object-type 'alist :array-type 'list
+                                     :null-object nil :false-object nil)))
+        (error (message "Doclive: unreadable Wiki state; starting fresh"))))))
+
+(defun doclive--wiki-save-state ()
+  "Atomically persist reading state when storage is enabled."
+  (when doclive-wiki-state-file
+    (let* ((file (expand-file-name doclive-wiki-state-file))
+           (directory (file-name-directory file))
+           temporary)
+      (condition-case err
+          (unwind-protect
+              (progn
+                (make-directory directory t)
+                (setq temporary (make-temp-file
+                                 (expand-file-name ".doclive-" directory)))
+                (with-temp-file temporary
+                  (insert (json-encode doclive--wiki-state)))
+                (set-file-modes temporary #o600)
+                (rename-file temporary file t))
+            (when (and temporary (file-exists-p temporary))
+              (delete-file temporary)))
+        (file-error (message "Doclive: cannot save reading state: %s"
+                             (error-message-string err)))))))
+
+(defun doclive--wiki-files (root)
+  "Return sorted canonical readable Markdown and Org files under ROOT.
+Do not visit document buffers or follow directory symlinks."
+  (let ((root (file-name-as-directory (file-truename root)))
+        files)
+    (cl-labels
+        ((walk (directory)
+           (dolist (file (condition-case nil
+                            (directory-files directory t
+                                             directory-files-no-dot-files-regexp)
+                          (file-error nil)))
+             (cond
+              ((file-directory-p file)
+               (unless (or (file-symlink-p file)
+                           (not (doclive--wiki-path-allowed-p file root)))
+                 (walk file)))
+              ((and (doclive--previewable-document-file-p file)
+                    (doclive--wiki-path-allowed-p file root))
+               (push (file-truename file) files))))))
+      (walk root))
+    (sort (delete-dups files) #'string-lessp)))
+
+(defun doclive--wiki-read (file)
+  "Read FILE without visiting it, preferring an existing edited buffer."
+  (let ((buffer (find-buffer-visiting file)))
+    (if (and buffer (buffer-modified-p buffer))
+        (with-current-buffer buffer
+          (save-restriction
+            (widen)
+            (buffer-substring-no-properties (point-min) (point-max))))
+      (with-temp-buffer
+        (insert-file-contents file)
+        (buffer-string)))))
+
+(defun doclive--wiki-title (file text)
+  "Return the first heading in TEXT, or FILE's base name."
+  (let ((case-fold-search t))
+    (if (string-match "^\\(?:#+ +\\|\\*+ +\\|#\\+title: *\\)\\(.+\\)$" text)
+        (string-trim (match-string 1 text))
+      (file-name-base file))))
+
+(defun doclive--wiki-search (root query)
+  "Search QUERY in Wiki ROOT, returning at most 100 ranked result plists.
+Prefer literal title or path matches, then whitespace-separated literal
+tokens across title and path in any order, then literal body matches.
+Each result has relative :path, display :name and body :snippet fields.
+An empty or whitespace-only query returns nil.  No files are visited."
+  (let* ((root (file-name-as-directory (file-truename root)))
+         (query (string-trim (or query "")))
+         (pattern (regexp-quote query))
+         (tokens (mapcar #'regexp-quote (split-string query nil t)))
+         (case-fold-search t)
+         (buckets (vector nil nil nil)))
+    (unless (string-empty-p query)
+      (dolist (file (doclive--wiki-files root))
+        (condition-case nil
+            (let* ((text (doclive--wiki-read file))
+                   (path (file-relative-name file root))
+                   (name (doclive--wiki-title file text))
+                   (metadata (concat name "\n" path))
+                   (hit (string-match pattern text))
+                   (rank (cond
+                          ((or (string-match-p pattern name)
+                               (string-match-p pattern path)) 0)
+                          ((seq-every-p
+                            (lambda (token) (string-match-p token metadata))
+                            tokens) 1)
+                          (hit 2))))
+              (when (and rank (< (length (aref buckets rank)) 100))
+                (push (list :path path :name name
+                            :snippet (replace-regexp-in-string
+                                      "[\n\r\t ]+" " "
+                                      (substring text (max 0 (- (or hit 0) 60))
+                                                 (min (length text)
+                                                      (+ (or hit 0) 180)))))
+                      (aref buckets rank))))
+          (file-error nil))))
+    (seq-take (append (nreverse (aref buckets 0))
+                      (nreverse (aref buckets 1))
+                      (nreverse (aref buckets 2)))
+              100)))
+
+(defun doclive--wiki-remember-page (root file)
+  "Remember FILE as a recently read page in ROOT."
+  (doclive--wiki-load-state)
+  (let* ((key (intern root))
+         (pages (alist-get 'recent doclive--wiki-state))
+         (relative (file-relative-name file root))
+         (recent (cons relative (delete relative (alist-get key pages)))))
+    (setf (alist-get key pages) (seq-take recent 20)
+          (alist-get 'recent doclive--wiki-state) pages))
+  (doclive--wiki-save-state))
+
+(defun doclive--wiki-workspace (id path)
+  "Return Wiki metadata for ID, applying validated preferences from PATH."
+  (doclive--wiki-load-state)
+  (let* ((entry (doclive--get-entry id))
+         (root (plist-get entry :wiki-root)))
+    (if (not root)
+        '((ok . t) (workspace . :json-false))
+      (let* ((key (intern root))
+             (bookmarks (alist-get 'bookmarks doclive--wiki-state))
+             (marked (alist-get key bookmarks))
+             (bookmark (doclive--query-param path "bookmark"))
+             (theme (doclive--query-param path "theme"))
+             (zoom (doclive--query-param path "zoom"))
+             (pins (doclive--query-param path "pins"))
+             (files (doclive--wiki-files root))
+             changed)
+        (when (and bookmark
+                   (member (expand-file-name bookmark root) files))
+          (setq marked (delete bookmark marked))
+          (when (equal (doclive--query-param path "value") "1")
+            (push bookmark marked))
+          (setf (alist-get key bookmarks) marked
+                (alist-get 'bookmarks doclive--wiki-state) bookmarks)
+          (setq changed t))
+        (when (member theme '("dark" "light"))
+          (setf (alist-get 'theme doclive--wiki-state) theme)
+          (setq changed t))
+        (when (and zoom (string-match-p "\\`[0-9.]+\\'" zoom)
+                   (<= 0.7 (string-to-number zoom) 2))
+          (setf (alist-get 'zoom doclive--wiki-state) (string-to-number zoom))
+          (setq changed t))
+        (when (and pins (< (length pins) 2000))
+          (let ((values (condition-case nil
+                            (json-parse-string pins :array-type 'list)
+                          (error :invalid))))
+            (when (and (listp values) (seq-every-p #'stringp values))
+              (setf (alist-get 'pins doclive--wiki-state) (seq-take values 12))
+              (setq changed t))))
+        (when changed (doclive--wiki-save-state))
+        `((ok . t) (workspace . t)
+          (name . ,(file-name-nondirectory (directory-file-name root)))
+          (current . ,(file-relative-name (plist-get entry :file) root))
+          (bookmarks . ,(vconcat marked))
+          (recent . ,(vconcat (alist-get key (alist-get 'recent doclive--wiki-state))))
+          (theme . ,(or (alist-get 'theme doclive--wiki-state) "dark"))
+          (zoom . ,(or (alist-get 'zoom doclive--wiki-state) 1))
+          (pins . ,(vconcat (alist-get 'pins doclive--wiki-state)))
+          (files . ,(vconcat
+                     (mapcar
+                      (lambda (file)
+                        `((path . ,(file-relative-name file root))
+                          (name . ,(condition-case nil
+                                       (doclive--wiki-title file (doclive--wiki-read file))
+                                     (file-error (file-name-base file))))))
+                      files))))))))
+
+(defun doclive--wiki-open (id relative)
+  "Open root-relative RELATIVE in the Wiki associated with ID."
+  (let* ((entry (doclive--get-entry id))
+         (root (plist-get entry :wiki-root))
+         (file (and root (doclive--local-document-link-p relative)
+                    (expand-file-name relative root))))
+    (if (and file (doclive--previewable-document-file-p file)
+             (doclive--wiki-path-allowed-p file root))
+        (doclive--open-linked-document
+         id (file-relative-name file (file-name-directory (plist-get entry :file))))
+      (json-encode '((ok . :json-false) (error . "Page is outside this Wiki or unavailable"))))))
 
 (defconst doclive--http-header-name-regexp
   "\\`[!#$%&'*+.^_`|~0-9A-Za-z-]+\\'"
@@ -1036,6 +1434,56 @@ SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
    "@media (max-width:980px){.layout{grid-template-columns:1fr}.toc{position:relative;top:auto;height:auto;max-height:240px;border-right:none;border-bottom:1px solid var(--border)}.md{padding:24px 16px 64px}}")
   "CSS stylesheet for the doclive preview page.")
 
+(defconst doclive--wiki-js
+  "let workspace=null, workspaceId=null, preferencesReady=false, wikiFilter='all';
+const explorer=document.createElement('aside'); explorer.id='explorer'; explorer.hidden=true; explorer.setAttribute('aria-label','Wiki explorer');
+explorer.innerHTML='<div class=wiki-heading><span>LIBRARY</span><strong id=wiki-name></strong></div><label class=wiki-search-label for=wiki-search>Search all pages <kbd>⌘ K</kbd></label><input id=wiki-search type=search placeholder=\"Title or text…\" autocomplete=off><div class=wiki-tabs role=group aria-label=\"Page filter\"><button data-filter=all aria-pressed=true>All pages</button><button data-filter=bookmarks aria-pressed=false>Saved</button><button data-filter=recent aria-pressed=false>Recent</button></div><p id=wiki-search-status role=status></p><nav id=wiki-files aria-label=\"Wiki pages\"></nav><nav id=wiki-results aria-label=\"Search results\" hidden></nav>';
+document.querySelector('.layout').prepend(explorer);
+const wikiToggle=document.createElement('button'); wikiToggle.id='wiki-toggle'; wikiToggle.textContent='Library'; wikiToggle.hidden=true; wikiToggle.setAttribute('aria-controls','explorer'); wikiToggle.setAttribute('aria-expanded','true'); document.querySelector('.toolbar').prepend(wikiToggle);
+const outlinePanel=document.querySelector('.toc'),outlineToggle=document.createElement('button'),compactOutline=matchMedia('(max-width:1200px)');outlinePanel.id='outline-panel';outlineToggle.id='outline-toggle';outlineToggle.textContent='Outline';outlineToggle.setAttribute('aria-controls','outline-panel');document.querySelector('.toolbar').appendChild(outlineToggle);
+function setOutline(open){outlinePanel.hidden=compactOutline.matches&&!open;outlineToggle.setAttribute('aria-expanded',String(!outlinePanel.hidden));if(open&&compactOutline.matches){outlinePanel.style.top=document.querySelector('.toolbar').getBoundingClientRect().bottom+'px';document.body.classList.add('explorer-closed');wikiToggle.setAttribute('aria-expanded','false');}}
+function resizeOutline(){outlineToggle.hidden=!compactOutline.matches;setOutline(false);if(!compactOutline.matches)outlinePanel.style.removeProperty('top');}window.addEventListener('resize',resizeOutline);resizeOutline();outlineToggle.onclick=()=>{setOutline(outlinePanel.hidden);if(!outlinePanel.hidden)outlinePanel.querySelector('a')?.focus();};outlinePanel.addEventListener('keydown',event=>{if(event.key==='Escape'&&compactOutline.matches){setOutline(false);outlineToggle.focus();}});outlinePanel.addEventListener('click',event=>{if(event.target.closest('a')&&compactOutline.matches){setOutline(false);outlineToggle.focus();}});
+const pagebar=document.createElement('div'); pagebar.className='wiki-pagebar'; pagebar.hidden=true; pagebar.innerHTML='<span id=wiki-path></span><button id=wiki-bookmark aria-pressed=false>Save page</button>'; mdEl.before(pagebar);
+const wikiSearch=document.getElementById('wiki-search'), wikiFiles=document.getElementById('wiki-files'), wikiResults=document.getElementById('wiki-results'), wikiStatus=document.getElementById('wiki-search-status'), bookmarkButton=document.getElementById('wiki-bookmark');
+const wikiStyle=document.createElement('style'); wikiStyle.textContent=`
+.layout{grid-template-columns:minmax(0,1fr)220px}.main{grid-column:1;grid-row:1;min-width:0}.toc{grid-column:2;grid-row:1;border-right:0;border-left:1px solid var(--border)}
+.wiki-mode .layout{grid-template-columns:260px minmax(0,1fr)220px}.wiki-mode .main{grid-column:2}.wiki-mode .toc{grid-column:3}
+#explorer{grid-column:1;grid-row:1;position:sticky;top:0;height:calc(100vh - 32px);overflow:auto;padding:24px 16px;box-sizing:border-box;background:var(--panel);border-right:1px solid var(--border);font-family:system-ui,sans-serif;font-size:13px}
+[hidden]{display:none!important}.wiki-heading{display:grid;gap:10px;margin-bottom:24px}.wiki-heading span{font-size:10px;letter-spacing:.16em;color:var(--muted)}.wiki-heading strong{font-size:18px;overflow-wrap:anywhere}.wiki-search-label{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;margin-bottom:8px}kbd{font:inherit}#wiki-search{box-sizing:border-box;width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;color:var(--text);background:var(--bg)}
+.wiki-tabs{display:flex;gap:4px;margin-top:14px}.wiki-tabs button{font:inherit;flex:1;padding:7px 2px;border:0;background:transparent;color:var(--muted);border-radius:6px;cursor:pointer}.wiki-tabs button[aria-pressed=true]{background:var(--bg);color:var(--text)}#wiki-search-status{color:var(--muted);font-size:12px;min-height:1em}
+.wiki-page{display:flex;flex-direction:column;gap:4px;width:100%;text-align:left;border:0;border-radius:7px;background:transparent;color:var(--text);padding:9px 10px;font:inherit;cursor:pointer;overflow-wrap:anywhere}.wiki-page:hover,.wiki-page[aria-current=page]{background:color-mix(in srgb,var(--accent) 12%,transparent)}.wiki-page[aria-current=page]{box-shadow:inset 2px 0 var(--accent)}.wiki-page small{font-size:11px;color:var(--muted)}.wiki-page .snippet{font-size:12px;line-height:1.6;color:var(--muted)}#wiki-files details{margin:4px 0 4px 8px}#wiki-files summary{padding:8px 2px;color:var(--muted);cursor:pointer;overflow-wrap:anywhere}
+.wiki-pagebar{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 28px;border-bottom:1px solid var(--border);font:12px system-ui;color:var(--muted)}#wiki-path{overflow-wrap:anywhere}.wiki-pagebar button{flex:none;background:transparent;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;cursor:pointer}.wiki-pagebar button[aria-pressed=true]{color:var(--accent)}
+.md{max-width:850px;line-height:1.85;letter-spacing:.005em;padding-top:40px}.md h1{font-size:2.1em;line-height:1.25}.md h2{font-size:1.5em;line-height:1.4}.md h3{font-size:1.2em}.md p,.md ul,.md ol{margin-block:1.15em}.md img{max-width:100%;height:auto;border-radius:6px}.md :is(h1,h2,h3,h4,h5,h6){scroll-margin-top:120px}.github-alert{border-left:3px solid var(--accent)!important;background:color-mix(in srgb,var(--accent) 5%,transparent)!important;border-radius:0 8px 8px 0}.alert-title{display:block;color:var(--accent);font-family:system-ui;font-size:.9em}.github-alert.warning,.github-alert.caution{border-left-color:#d9a441!important}.wordmark{font-size:14px!important}.caret{display:none}.hero{animation:none!important}button:focus-visible,input:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.wiki-mode.explorer-closed .layout{grid-template-columns:minmax(0,1fr)220px}.wiki-mode.explorer-closed #explorer{display:none}.wiki-mode.explorer-closed .main{grid-column:1}.wiki-mode.explorer-closed .toc{grid-column:2}
+@media(max-width:1200px){.layout{grid-template-columns:minmax(0,1fr)}.wiki-mode .layout{grid-template-columns:240px minmax(0,1fr)}.wiki-mode.explorer-closed .layout{grid-template-columns:1fr}.toc{position:fixed;z-index:9;right:0;top:60px;bottom:32px;height:auto;max-height:none;width:min(320px,88vw);box-sizing:border-box;background:var(--panel);box-shadow:-12px 0 30px #0003;overflow:auto}}
+@media(max-width:800px){.layout,.wiki-mode .layout{display:block}#explorer{position:fixed;z-index:8;top:60px;bottom:32px;height:auto;width:min(320px,88vw);box-shadow:12px 0 30px #0003}.wiki-pagebar{padding:12px 16px}.toolbar{padding:10px!important}.hero{display:none}.md{padding:24px 20px 64px}.toolbar #search{min-width:90px;max-width:150px}}
+`; document.head.appendChild(wikiStyle);
+function pageButton(page){const button=document.createElement('button');button.className='wiki-page';button.dataset.path=page.path;button.setAttribute('aria-current',workspace&&workspace.current===page.path?'page':'false');const title=document.createElement('span');title.textContent=page.name;button.appendChild(title);const path=document.createElement('small');path.textContent=page.path;button.appendChild(path);if(page.snippet){const snippet=document.createElement('span');snippet.className='snippet';snippet.textContent=page.snippet;button.appendChild(snippet);}button.onclick=()=>openLinkedDocument(page.path,true);return button;}
+function renderWorkspace(){if(!workspace)return;document.getElementById('wiki-name').textContent=workspace.name;document.getElementById('wiki-path').textContent=workspace.current;const saved=workspace.bookmarks.includes(workspace.current);bookmarkButton.setAttribute('aria-pressed',String(saved));bookmarkButton.textContent=saved?'Saved':'Save page';wikiFiles.replaceChildren();let pages=workspace.files;if(wikiFilter==='bookmarks')pages=pages.filter(p=>workspace.bookmarks.includes(p.path));if(wikiFilter==='recent')pages=workspace.recent.map(path=>pages.find(p=>p.path===path)).filter(Boolean);const folders=new Map();pages.forEach(page=>{let parent=wikiFiles;const parts=page.path.split('/');parts.pop();if(wikiFilter==='all'){let prefix='';parts.forEach(part=>{prefix+=part+'/';let folder=folders.get(prefix);if(!folder){folder=document.createElement('details');folder.open=true;const summary=document.createElement('summary');summary.textContent=part;folder.appendChild(summary);parent.appendChild(folder);folders.set(prefix,folder);}parent=folder;});}parent.appendChild(pageButton(page));});if(!wikiSearch.value)wikiStatus.textContent=pages.length?pages.length+' pages':wikiFilter==='bookmarks'?'Save a page to find it here.':'No pages yet.';}
+async function refreshWorkspace(){const id=currentId,generation=navigationGeneration;const response=await fetch('/workspace?id='+encodeURIComponent(id),{cache:'no-store'});const data=await response.json();if(id!==currentId||generation!==navigationGeneration)return;if(!data.ok)throw Error(data.error||'Workspace unavailable');workspaceId=id;workspace=data.workspace?data:null;explorer.hidden=!workspace;wikiToggle.hidden=!workspace;pagebar.hidden=!workspace;document.body.classList.toggle('wiki-mode',!!workspace);if(!workspace)return;if(!preferencesReady){zoom=Number(data.zoom)||1;pinned=Array.isArray(data.pins)?data.pins:[];applyTheme(data.theme);applyZoom();renderChips();applyHighlights();preferencesReady=true;if(innerWidth<=800)document.body.classList.add('explorer-closed');}wikiToggle.setAttribute('aria-expanded',String(!document.body.classList.contains('explorer-closed')));renderWorkspace();}
+let savePreferencesTimer;function savePreferences(){if(!workspace||!preferencesReady)return;clearTimeout(savePreferencesTimer);savePreferencesTimer=setTimeout(async()=>{try{const query=new URLSearchParams({id:currentId,theme:themeEl.value,zoom:String(zoom),pins:JSON.stringify(pinned)});const r=await fetch('/workspace?'+query,{cache:'no-store'});if(!r.ok)throw Error();}catch(e){wikiStatus.textContent='Could not save reading preferences.';}},250);}
+document.querySelector('.toolbar').addEventListener('click',savePreferences);themeEl.addEventListener('change',savePreferences);
+wikiToggle.onclick=()=>{const closed=document.body.classList.toggle('explorer-closed');wikiToggle.setAttribute('aria-expanded',String(!closed));if(!closed){setOutline(false);wikiSearch.focus();}};
+document.querySelectorAll('[data-filter]').forEach(button=>button.onclick=()=>{wikiFilter=button.dataset.filter;document.querySelectorAll('[data-filter]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));wikiSearch.value='';wikiSearch.dispatchEvent(new Event('input'));renderWorkspace();});
+bookmarkButton.onclick=async()=>{if(!workspace)return;const id=currentId,generation=navigationGeneration;bookmarkButton.disabled=true;try{const query=new URLSearchParams({id:currentId,bookmark:workspace.current,value:workspace.bookmarks.includes(workspace.current)?'0':'1'});const response=await fetch('/workspace?'+query,{cache:'no-store'});const data=await response.json();if(id!==currentId||generation!==navigationGeneration)return;if(!data.ok)throw Error();workspace=data;renderWorkspace();}catch(e){if(id===currentId&&generation===navigationGeneration)wikiStatus.textContent='Could not save bookmark. Try again.';}finally{bookmarkButton.disabled=false;}};
+let searchTimer,searchGeneration=0;wikiSearch.addEventListener('input',()=>{clearTimeout(searchTimer);const id=currentId,navigation=navigationGeneration,generation=++searchGeneration,q=wikiSearch.value.trim();wikiFiles.hidden=!!q;wikiResults.hidden=!q;wikiResults.replaceChildren();if(!q){renderWorkspace();return;}wikiStatus.textContent='Searching…';searchTimer=setTimeout(async()=>{try{const response=await fetch('/search?'+new URLSearchParams({id,q}),{cache:'no-store'});const data=await response.json();if(generation!==searchGeneration||navigation!==navigationGeneration)return;if(!data.ok)throw Error();wikiResults.replaceChildren(...data.results.map(pageButton));wikiStatus.textContent=data.results.length?data.results.length+' results':'No matching pages. Try another word.';}catch(e){if(generation===searchGeneration&&navigation===navigationGeneration)wikiStatus.textContent='Search unavailable. Try again.';}},180);});
+window.docliveSetWikiSearch=function(text){if(!workspace)return false;setOutline(false);document.body.classList.remove('explorer-closed');wikiToggle.setAttribute('aria-expanded','true');wikiSearch.value=String(text==null?'':text);wikiSearch.dispatchEvent(new Event('input'));return true;};
+window.docliveDismiss=function(){closeMermaidOverlay();window.docliveSetSearch('');wikiSearch.value='';wikiSearch.dispatchEvent(new Event('input'));setOutline(false);document.body.classList.add('explorer-closed');wikiToggle.setAttribute('aria-expanded','false');document.activeElement?.blur();mdEl.focus({preventScroll:true});};
+explorer.addEventListener('keydown',event=>{if(event.isComposing||event.keyCode===229)return;const buttons=Array.from((wikiResults.hidden?wikiFiles:wikiResults).querySelectorAll('.wiki-page')).filter(b=>!b.closest('details:not([open])'));if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();const index=buttons.indexOf(document.activeElement);const next=event.key==='ArrowDown'?Math.min(index+1,buttons.length-1):Math.max(index-1,0);if(buttons[next])buttons[next].focus();}if(event.key==='Enter'&&event.target===wikiSearch&&buttons[0])buttons[0].click();if(event.key==='Escape'){if(wikiSearch.value){wikiSearch.value='';wikiSearch.dispatchEvent(new Event('input'));wikiSearch.focus();}else{document.body.classList.add('explorer-closed');wikiToggle.setAttribute('aria-expanded','false');wikiToggle.focus();}}});
+document.addEventListener('keydown',event=>{if(workspace&&(event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='k'){event.preventDefault();document.body.classList.remove('explorer-closed');wikiToggle.setAttribute('aria-expanded','true');wikiSearch.focus();wikiSearch.select();}});
+buildToc=function(){tocEl.replaceChildren();const headings=Array.from(mdEl.querySelectorAll('h1,h2,h3,h4,h5,h6')),used=new Set(headings.filter(h=>h.id).map(h=>h.id)),links=new Map();headings.forEach(h=>{if(!h.id){const base=h.textContent.trim().toLowerCase().replace(/[^\\p{L}\\p{N}_\\s-]/gu,'').replace(/\\s/g,'-')||'section';let slug=base,n=0;while(used.has(slug))slug=base+'-'+(++n);h.id=slug;used.add(slug);}const a=document.createElement('a');a.href='#'+encodeURIComponent(h.id);a.textContent=h.textContent;a.style.paddingLeft=((Number(h.tagName.slice(1))-1)*10+8)+'px';tocEl.appendChild(a);links.set(h.id,a);});tocLinks=links;tocHeadings=headings.map(h=>h.id);updateActiveToc();};
+const originalApplyContent=applyContent;applyContent=async function(data){const changed=await originalApplyContent(data);if(data.sourceId!==currentId||data.navigationGeneration!==navigationGeneration)return;if(changed){mdEl.innerHTML=mdEl.getAttribute('data-base-html')||mdEl.innerHTML;mdEl.querySelectorAll('blockquote').forEach(block=>{const p=block.querySelector('p');if(!p||!p.firstChild||p.firstChild.nodeType!==Node.TEXT_NODE)return;const match=p.firstChild.textContent.match(/^\\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\\]\\s*/);if(!match)return;p.firstChild.textContent=p.firstChild.textContent.slice(match[0].length);block.classList.add('github-alert',match[1].toLowerCase());const label=document.createElement('strong');label.className='alert-title';label.textContent=match[1][0]+match[1].slice(1).toLowerCase();block.prepend(label);});mdEl.setAttribute('data-base-html',mdEl.innerHTML);applyHighlights();}if(workspaceId!==currentId){try{await refreshWorkspace();}catch(e){if(data.sourceId===currentId)wikiStatus.textContent='Library unavailable. Reload to retry.';}}};
+function navigationUrl(id,hash=''){const url=new URL(location.href);url.search='?'+new URLSearchParams({id});url.hash=hash;return url.pathname+url.search+url.hash;}
+function recordNavigation(id,hash=''){const url=navigationUrl(id,hash);if(url===location.pathname+location.search+location.hash)return;navStack=navStack.slice(0,navIndex+1);navStack.push({id});navIndex=navStack.length-1;history.pushState({id,docliveIndex:navIndex},'',url);updateNavButtons();}
+function scrollToFragment(hash){let fragment=hash.replace(/^#/,'');try{fragment=decodeURIComponent(fragment);}catch(e){}const target=fragment&&document.getElementById(fragment);if(target)target.scrollIntoView();else window.scrollTo(0,0);}
+async function navigatePage(id,hash,generation,record){if(generation!==navigationGeneration)return;if(id!==currentId||lastRev<0){const data=await fetchContent(id);if(generation!==navigationGeneration)return;if(!data.ok)throw Error(data.error||'Page unavailable');currentId=id;lastRev=-1;++renderGeneration;if(record)recordNavigation(id,hash);connectSSE();await applyContent(data);}else if(record){recordNavigation(id,hash);}if(generation!==navigationGeneration)return;scrollToFragment(hash);if(innerWidth<=800){document.body.classList.add('explorer-closed');wikiToggle.setAttribute('aria-expanded','false');}mdEl.tabIndex=-1;mdEl.focus({preventScroll:true});}
+openLinkedDocument=async function(href,fromRoot=false){const generation=++navigationGeneration;mdEl.setAttribute('aria-busy','true');statusEl.textContent='Opening page…';try{const response=await fetch('/open?'+new URLSearchParams({id:currentId,path:href,...(fromRoot?{wiki:'1'}:{})}),{cache:'no-store'});const data=await response.json();if(generation!==navigationGeneration)return;if(!data.ok)throw Error(data.error||'Page unavailable');const hash=href.includes('#')?href.slice(href.indexOf('#')):'';await navigatePage(data.buffer_id,hash,generation,true);if(generation===navigationGeneration)showLiveStatus();}catch(e){if(generation===navigationGeneration)statusEl.textContent=e.message||'Could not open page.';}finally{if(generation===navigationGeneration)mdEl.removeAttribute('aria-busy');}};
+window.addEventListener('popstate',async event=>{const id=new URLSearchParams(location.search).get('id');if(!id)return;const generation=++navigationGeneration,hash=location.hash;if(Number.isInteger(event.state?.docliveIndex)){navIndex=event.state.docliveIndex;updateNavButtons();}mdEl.setAttribute('aria-busy','true');try{await navigatePage(id,hash,generation,false);}catch(e){if(generation===navigationGeneration)statusEl.textContent=e.message||'Could not restore page.';}finally{if(generation===navigationGeneration)mdEl.removeAttribute('aria-busy');}});
+document.addEventListener('click',event=>{if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;const link=event.target.closest('a[href]');if(!link||!link.closest('#md,#toc'))return;const href=link.getAttribute('href');if(!href.startsWith('#'))return;event.preventDefault();recordNavigation(currentId,href);scrollToFragment(href);});
+function initializeNavigation(){navStack=[{id:currentId}];navIndex=0;history.replaceState({id:currentId,docliveIndex:0},'',navigationUrl(currentId,location.hash));updateNavButtons();}
+"
+  "Wiki explorer and reading enhancements for the preview client.")
+
 (defconst doclive--preview-js
   (concat
    "const qs=new URLSearchParams(location.search); let currentId=qs.get('id');"
@@ -1044,7 +1492,7 @@ SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
    "const searchEl=document.getElementById('search'); const pinEl=document.getElementById('pin'); const chipsEl=document.getElementById('chips');"
    "const themeEl=document.getElementById('theme'); const dotEl=document.getElementById('dot');"
    "const scrollPosEl=document.getElementById('scrollpos');"
-   "let lastRev=-1;"
+   "let lastRev=-1,renderGeneration=0,navigationGeneration=0;let liveName='';function showLiveStatus(connection='live'){statusEl.textContent=lastRev>=0?connection+' • rev '+lastRev+' • '+liveName:connection;}"
    "let scrollTick=false;"
    "function updateScrollPos(){const doc=document.documentElement; const max=doc.scrollHeight-doc.clientHeight; let label; if(max<=4){label='All';}else{const y=window.scrollY||doc.scrollTop; if(y<=2){label='Top';}else if(y>=max-2){label='Bot';}else{label=Math.round((y/max)*100)+'%';}} scrollPosEl.textContent=label;}"
    "window.addEventListener('scroll',()=>{if(scrollTick) return; scrollTick=true; requestAnimationFrame(()=>{scrollTick=false; updateScrollPos(); updateActiveToc();});},{passive:true});"
@@ -1065,11 +1513,11 @@ SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
    "function updateActiveToc(){if(!tocHeadings.length) return; const line=Math.min(120,window.innerHeight*0.25); let currentId=tocHeadings[0]; tocHeadings.forEach((id)=>{const h=document.getElementById(id); if(h&&h.getBoundingClientRect().top<=line) currentId=id;}); tocLinks.forEach((a)=>a.classList.remove('active')); const active=tocLinks.get(currentId); if(active) active.classList.add('active');}"
    "function buildToc(){tocEl.innerHTML=''; const hs=mdEl.querySelectorAll('h1,h2,h3,h4,h5,h6'); const links=new Map(); hs.forEach((h,i)=>{if(!h.id)h.id='h-'+i; const a=document.createElement('a'); a.href='#'+h.id; a.textContent=h.textContent; a.style.paddingLeft=((parseInt(h.tagName.slice(1))-1)*10+8)+'px'; tocEl.appendChild(a); links.set(h.id,a);}); tocLinks=links; tocHeadings=Array.from(hs).map((h)=>h.id); updateActiveToc();}"
    "function wrapTables(){mdEl.querySelectorAll('table').forEach((t)=>{if(t.closest('.table-wrap')) return; const wrap=document.createElement('div'); wrap.className='table-wrap'; t.parentNode.insertBefore(wrap,t); wrap.appendChild(t);});}"
-   "function highlightCodeBlocks(){mdEl.querySelectorAll('pre code').forEach((code)=>{try{hljs.highlightElement(code);}catch(e){}});}"
+   "function highlightCodeBlocks(){mdEl.querySelectorAll('pre code').forEach((code)=>{try{const language=(code.className+' '+code.parentElement.className).match(/\\blang(?:uage)?-([\\w-]+)\\b/i);if(language&&!hljs.getLanguage(language[1])){code.classList.add('hljs','nohighlight');return;}hljs.highlightElement(code);}catch(e){}});}"
    "function fallbackCopyText(text){let ok=false; const sel=document.getSelection(); const prevRange=sel&&sel.rangeCount?sel.getRangeAt(0):null; const ta=document.createElement('textarea'); ta.value=text; ta.setAttribute('readonly',''); ta.style.position='fixed'; ta.style.top='-1000px'; ta.style.left='-1000px'; document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0,ta.value.length); try{ok=document.execCommand('copy');}catch(e){ok=false;} document.body.removeChild(ta); if(sel){sel.removeAllRanges(); if(prevRange) sel.addRange(prevRange);} return ok;}"
-   "function wireCopy(){mdEl.querySelectorAll('pre').forEach((pre)=>{const old=pre.querySelector('.copy-btn'); if(old) old.remove(); const code=pre.querySelector('code'); const src=code||pre; const b=document.createElement('button'); b.className='copy-btn'; b.textContent='Copy'; b.onclick=async()=>{let ok=false; if(navigator.clipboard&&navigator.clipboard.writeText){try{await navigator.clipboard.writeText(src.innerText); ok=true;}catch(e){ok=false;}} if(!ok){ok=fallbackCopyText(src.innerText);} b.textContent=ok?'Copied':'Failed'; setTimeout(()=>b.textContent='Copy',900);}; pre.appendChild(b);});}"
+   "function wireCopy(){mdEl.querySelectorAll('pre').forEach((pre)=>{const old=pre.querySelector('.copy-btn'); if(old) old.remove(); const code=pre.querySelector('code'); const src=code||pre; const b=document.createElement('button'); b.className='copy-btn'; b.textContent='Copy'; b.onclick=async()=>{const text=src.innerText;let ok=false;const nativeCopy=window.docliveCopyText(text); if(navigator.clipboard&&navigator.clipboard.writeText){try{await navigator.clipboard.writeText(src.innerText); ok=true;}catch(e){ok=false;}} if(!ok){ok=fallbackCopyText(src.innerText);} ok=(await nativeCopy)||ok;b.textContent=ok?'Copied':'Failed'; setTimeout(()=>b.textContent='Copy',900);}; pre.appendChild(b);});}"
    "function normalizeMermaidSvgSize(svg){if(!svg) return; if(svg.getAttribute('width')==='100%') svg.removeAttribute('width'); const style=svg.getAttribute('style'); if(style){const stripped=style.replace(/max-width\\s*:[^;]+;?/i,'').trim(); if(stripped){svg.setAttribute('style',stripped);}else{svg.removeAttribute('style');}} const vb=(svg.getAttribute('viewBox')||'').trim().split(/\\s+/); if(vb.length===4){const w=parseFloat(vb[2]); const h=parseFloat(vb[3]); if(w>0&&!isNaN(w)) svg.setAttribute('width',String(w)); if(h>0&&!isNaN(h)) svg.setAttribute('height',String(h));}}"
-   "async function renderMermaid(){"
+   "async function renderMermaid(){const generation=renderGeneration,navigation=navigationGeneration;"
    "const blocks=Array.from(mdEl.querySelectorAll('pre code.language-mermaid, pre code.language-mmd, pre.src-mermaid, pre.src.src-mermaid'));"
    "for(const el of blocks){"
    "const pre=el.tagName==='PRE'?el:el.closest('pre');"
@@ -1080,6 +1528,7 @@ SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
    "const holder=document.createElement('div'); holder.className='mermaid-holder';"
    "try{const out=await mermaid.render('m'+Math.random().toString(36).slice(2),graph); setSanitizedSvg(holder,out.svg); normalizeMermaidSvgSize(holder.querySelector('svg'));}"
    "catch(e){holder.className='render-error'; holder.textContent=graph;}"
+   "if(generation!==renderGeneration||navigation!==navigationGeneration)return;"
    "if(pre&&pre.parentNode) pre.parentNode.replaceChild(holder,pre);"
    "}"
    "wireMermaidTools();"
@@ -1119,22 +1568,26 @@ SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
    "function escReg(s){return s.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&');}"
    "function replaceTextNode(node,re,cls){const text=node.nodeValue; let m,last=0; const frag=document.createDocumentFragment(); while((m=re.exec(text))!==null){if(m.index>last) frag.appendChild(document.createTextNode(text.slice(last,m.index))); const mark=document.createElement('mark'); mark.className=cls; mark.textContent=m[0]; frag.appendChild(mark); last=re.lastIndex; if(re.lastIndex===m.index) re.lastIndex++;} if(last<text.length) frag.appendChild(document.createTextNode(text.slice(last))); node.parentNode.replaceChild(frag,node);}"
    "function walkAndHighlight(root,re,cls){const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode(n){if(!n.nodeValue.trim()) return NodeFilter.FILTER_REJECT; const p=n.parentNode; if(!p) return NodeFilter.FILTER_REJECT; if(p.closest&&p.closest('script,style,code,pre,.katex,svg')) return NodeFilter.FILTER_REJECT; return NodeFilter.FILTER_ACCEPT;}}); const nodes=[]; while(walker.nextNode()) nodes.push(walker.currentNode); nodes.forEach(n=>replaceTextNode(n,re,cls));}"
-   "function applyHighlights(){const html=mdEl.getAttribute('data-base-html')||mdEl.innerHTML; mdEl.innerHTML=html; highlightCodeBlocks(); const q=(searchEl.value||'').trim(); if(q){walkAndHighlight(mdEl,new RegExp(escReg(q),'gi'),'mark-pin-0');} pinned.forEach((term,idx)=>{if(term){walkAndHighlight(mdEl,new RegExp(escReg(term),'gi'),'mark-pin-'+(idx%4));}}); wireCopy(); wireMermaidTools(); wireDocumentLinkNavigation();}"
+   "function applyHighlights(){const html=mdEl.getAttribute('data-base-html')||mdEl.innerHTML; mdEl.innerHTML=html; highlightCodeBlocks(); const q=(searchEl.value||'').trim(); if(q){walkAndHighlight(mdEl,new RegExp(escReg(q),'gi'),'mark-pin-0 search-match');} pinned.forEach((term,idx)=>{if(term){walkAndHighlight(mdEl,new RegExp(escReg(term),'gi'),'mark-pin-'+(idx%4));}}); wireCopy(); wireMermaidTools(); wireDocumentLinkNavigation();}"
    "function renderChips(){chipsEl.innerHTML=''; pinned.forEach((term,idx)=>{const el=document.createElement('span'); el.className='chip'; const label=document.createElement('b'); label.textContent=term; el.appendChild(label); const c=document.createElement('button'); c.className='chip-close'; c.textContent='×'; c.setAttribute('aria-label','Remove pinned highlight: '+term); c.onclick=()=>{pinned=pinned.filter((_,i)=>i!==idx); applyHighlights(); renderChips();}; el.appendChild(c); chipsEl.appendChild(el);});}"
    "function normalizeTheme(theme){return theme==='light'?'light':'dark';}"
    "function getStoredTheme(){try{return localStorage.getItem('doclive-theme');}catch(e){return null;}}"
    "function storeTheme(theme){try{localStorage.setItem('doclive-theme',theme);}catch(e){}}"
    "function applyTheme(theme){theme=normalizeTheme(theme); document.body.setAttribute('data-theme',theme); storeTheme(theme); themeEl.value=theme; initializeMermaid();}"
    "function applyZoom(){mdEl.style.fontSize=(zoom*100)+'%';}"
-   "function pushNav(id,name){if(navIndex>=0&&navStack[navIndex]&&navStack[navIndex].id===id) return; navStack=navStack.slice(0,navIndex+1); navStack.push({id:id,name:name||''}); navIndex=navStack.length-1; updateNavButtons();}"
    "function updateNavButtons(){document.getElementById('back').disabled=navIndex<=0; document.getElementById('forward').disabled=navIndex<0||navIndex>=navStack.length-1;}"
    "let es=null;"
-   "async function fetchContent(){const r=await fetch('/content?id='+encodeURIComponent(currentId),{cache:'no-store'}); return r.json();}"
-   "async function applyContent(j){if(!j.ok){statusEl.textContent=j.error||'not found'; dotEl.className='dot dot-disconnected'; return;} statusEl.textContent='live • rev '+j.revision+' • '+(j.name||''); dotEl.className='dot'; document.title=j.name?j.name+' - doclive':'doclive'; if(j.revision===lastRev) return; lastRev=j.revision; const kind=j.contentKind||'markdown'; let html=''; if(kind==='org-html'){html=j.html||'';}else{const parsed=parseFrontmatter(j.markdown||''); html=renderFrontmatter(parsed.front)+marked.parse(parsed.body||'');} html=sanitizeHtml(html); mdEl.setAttribute('data-content-kind',kind); mdEl.innerHTML=html; wireCopy(); renderMath(); await renderMermaid(); buildToc(); wrapTables(); mdEl.setAttribute('data-base-html',mdEl.innerHTML); applyHighlights(); applyZoom(); pushNav(currentId,j.name||''); history.replaceState({id:currentId},'',`?id=${encodeURIComponent(currentId)}`); updateScrollPos();}"
+   "async function fetchContent(id=currentId){const generation=navigationGeneration; const r=await fetch('/content?id='+encodeURIComponent(id),{cache:'no-store'}); const data=await r.json(); return {...data,sourceId:id,navigationGeneration:generation};}"
+   "async function applyContent(j){if(j.sourceId!==currentId||j.navigationGeneration!==navigationGeneration)return false;if(!j.ok){statusEl.textContent=j.error||'not found'; dotEl.className='dot dot-disconnected'; return false;} if(j.revision<=lastRev)return false;statusEl.textContent='live • rev '+j.revision+' • '+(j.name||''); dotEl.className='dot'; document.title=j.name?j.name+' - doclive':'doclive'; const generation=++renderGeneration; const kind=j.contentKind||'markdown'; let html=''; if(kind==='org-html'){html=j.html||'';}else{const parsed=parseFrontmatter(j.markdown||''); html=renderFrontmatter(parsed.front)+marked.parse(parsed.body||'');} html=sanitizeHtml(html); mdEl.setAttribute('data-content-kind',kind); mdEl.innerHTML=html; wireCopy(); renderMath(); await renderMermaid(); if(generation!==renderGeneration||j.sourceId!==currentId||j.navigationGeneration!==navigationGeneration)return false;lastRev=j.revision;liveName=j.name||'';showLiveStatus(); buildToc(); wrapTables(); mdEl.setAttribute('data-base-html',mdEl.innerHTML); applyHighlights(); applyZoom(); updateScrollPos(); return true;}"
    "async function openLinkedDocument(href){try{const r=await fetch('/open?id='+encodeURIComponent(currentId)+'&path='+encodeURIComponent(href),{cache:'no-store'}); const j=await r.json(); if(!j.ok){statusEl.textContent=j.error||'open failed'; return;} currentId=j.buffer_id; lastRev=-1; connectSSE(); const c=await fetchContent(); await applyContent(c);}catch(e){statusEl.textContent='open failed';}}"
    "function wireDocumentLinkNavigation(){mdEl.querySelectorAll('a[href]').forEach(a=>{const href=a.getAttribute('href')||''; if(/^[a-zA-Z][a-zA-Z0-9+.-]*:/i.test(href)||href.startsWith('#')||href.startsWith('//')||href.indexOf(String.fromCharCode(92))!==-1) return; if(!/\\.(md|org|html)($|#|\\?)/i.test(href)) return; a.addEventListener('click',ev=>{ev.preventDefault(); openLinkedDocument(href);});});}"
-   "function connectSSE(){if(!currentId){statusEl.textContent='missing id'; dotEl.className='dot dot-disconnected'; return;} if(es){es.close(); es=null;} es=new EventSource('/events?id='+encodeURIComponent(currentId)); es.addEventListener('open',()=>{statusEl.textContent='connected'; dotEl.className='dot';}); es.addEventListener('revision',async()=>{try{const j=await fetchContent(); await applyContent(j);}catch(e){statusEl.textContent='sync error';}}); es.onerror=()=>{statusEl.textContent='reconnecting…'; dotEl.className='dot dot-disconnected';};}"
-   "window.docliveSetSearch=function(text){searchEl.value=String(text==null?'':text); applyHighlights();};"
+   "function connectSSE(){if(!currentId){statusEl.textContent='missing id'; dotEl.className='dot dot-disconnected'; return;} if(es){es.close(); es=null;} const id=currentId,source=new EventSource('/events?id='+encodeURIComponent(id));es=source;source.addEventListener('open',()=>{if(es!==source)return;showLiveStatus(lastRev>=0?'live':'connected'); dotEl.className='dot';}); source.addEventListener('revision',async()=>{if(es!==source)return;try{const j=await fetchContent(id);if(es===source)await applyContent(j);}catch(e){if(es===source)statusEl.textContent='sync error';}}); source.onerror=()=>{if(es!==source)return;showLiveStatus('reconnecting…'); dotEl.className='dot dot-disconnected';};}"
+   "window.docliveGetSearch=function(wiki){return (wiki?wikiSearch:searchEl).value;};"
+   "window.docliveSetSearch=function(text){searchEl.value=String(text==null?'':text); applyHighlights();searchMatchIndex=-1;return window.docliveSearchNext(false);};"
+   "let searchMatchIndex=-1;window.docliveSearchNext=function(backward=false){const matches=Array.from(mdEl.querySelectorAll('.search-match'));matches.forEach(m=>{m.style.outline='';m.removeAttribute('aria-current');});if(!matches.length)return {index:0,total:0};searchMatchIndex=(searchMatchIndex+(backward?-1:1)+matches.length)%matches.length;const match=matches[searchMatchIndex];match.style.outline='2px solid var(--accent)';match.setAttribute('aria-current','true');match.scrollIntoView({block:'center'});return {index:searchMatchIndex+1,total:matches.length};};"
+   "window.docliveGetSelection=function(){const input=document.activeElement;if(input&&(input.tagName==='INPUT'||input.tagName==='TEXTAREA')&&typeof input.selectionStart==='number')return input.value.slice(input.selectionStart,input.selectionEnd);return window.getSelection().toString();};"
+   "window.doclivePaste=function(text){const input=document.activeElement; text=String(text);if(input&&(input.tagName==='INPUT'||input.tagName==='TEXTAREA')&&typeof input.selectionStart==='number'){if(input.readOnly||input.disabled)return false;input.setRangeText(text,input.selectionStart,input.selectionEnd,'end');input.dispatchEvent(new Event('input',{bubbles:true}));return true;}searchEl.focus();window.docliveSetSearch(text);searchEl.setSelectionRange(text.length,text.length);return true;};"
+   "window.docliveCopyText=async function(text){try{const query=new URLSearchParams({id:currentId,text:JSON.stringify(String(text))});if(query.toString().length>12000)return false;const response=await fetch('/copy?'+query,{cache:'no-store'});return response.ok&&(await response.json()).ok===true;}catch(e){return false;}};"
    "document.addEventListener('keydown',(ev)=>{if(ev.key==='Escape') closeMermaidOverlay();});"
    "searchEl.addEventListener('input',()=>applyHighlights());"
    "pinEl.addEventListener('click',()=>{const q=(searchEl.value||'').trim(); if(!q) return; if(!pinned.includes(q)) pinned.push(q); renderChips(); applyHighlights();});"
@@ -1142,10 +1595,12 @@ SCRIPT-NONCE is included in the CSP when it is safe for nonce use."
    "document.getElementById('zoom-in').addEventListener('click',()=>{zoom=Math.min(2,zoom+0.1);applyZoom();});"
    "document.getElementById('zoom-out').addEventListener('click',()=>{zoom=Math.max(0.7,zoom-0.1);applyZoom();});"
    "document.getElementById('zoom-reset').addEventListener('click',()=>{zoom=1;applyZoom();});"
-   "document.getElementById('back').addEventListener('click',async()=>{if(navIndex<=0) return; navIndex--; currentId=navStack[navIndex].id; updateNavButtons(); lastRev=-1; connectSSE(); const j=await fetchContent(); await applyContent(j);});"
-   "document.getElementById('forward').addEventListener('click',async()=>{if(navIndex>=navStack.length-1) return; navIndex++; currentId=navStack[navIndex].id; updateNavButtons(); lastRev=-1; connectSSE(); const j=await fetchContent(); await applyContent(j);});"
+   "document.getElementById('back').addEventListener('click',()=>history.back());"
+   "document.getElementById('forward').addEventListener('click',()=>history.forward());"
+   doclive--wiki-js
    "applyTheme(getStoredTheme());"
    "scrubSensitiveQueryFromLocation();"
+   "initializeNavigation();"
    "(async()=>{try{const j=await fetchContent(); await applyContent(j);}catch(e){statusEl.textContent='initial load failed'; dotEl.className='dot dot-disconnected';} connectSSE();})();")
   "Client-side JavaScript for the doclive preview page.")
 
@@ -1523,6 +1978,36 @@ for the page title."
           (process-send-string proc (doclive--http-response "200 OK" "application/json" (doclive--json-for-id id)))
           (delete-process proc))
       (doclive--send-forbidden proc)))
+   ((doclive--route-matches-p path "/copy")
+    (if (doclive--authorized-request-p path headers)
+        (let* ((id (doclive--query-param path "id"))
+               (text (condition-case nil
+                         (json-parse-string (or (doclive--query-param path "text") ""))
+                       (error nil)))
+               (valid (and (doclive--get-entry id)
+                           (stringp text) (not (string-empty-p text))
+                           (<= (string-bytes text) 12000))))
+          (when valid (kill-new text))
+          (process-send-string
+           proc (doclive--http-response
+                 (if valid "200 OK" "400 Bad Request") "application/json"
+                 (json-encode (if valid '((ok . t))
+                                '((ok . :json-false) (error . "Invalid copy request"))))))
+          (delete-process proc))
+      (doclive--send-forbidden proc)))
+   ((or (doclive--route-matches-p path "/workspace")
+        (doclive--route-matches-p path "/search"))
+    (if (doclive--authorized-request-p path headers)
+        (let* ((id (doclive--query-param path "id"))
+               (root (plist-get (doclive--get-entry id) :wiki-root))
+               (body (if (doclive--route-matches-p path "/workspace")
+                         (doclive--wiki-workspace id path)
+                       (if root
+                           `((ok . t) (results . ,(vconcat (doclive--wiki-search root (doclive--query-param path "q")))))
+                         '((ok . :json-false) (error . "No Wiki workspace"))))))
+          (process-send-string proc (doclive--http-response "200 OK" "application/json" (json-encode body)))
+          (delete-process proc))
+      (doclive--send-forbidden proc)))
    ((doclive--route-matches-p path "/open")
     (if (doclive--authorized-request-p path headers)
         (let ((id (doclive--query-param path "id"))
@@ -1530,7 +2015,9 @@ for the page title."
           (process-send-string
            proc
            (doclive--http-response "200 OK" "application/json"
-                                    (doclive--open-linked-document id rel)))
+                                    (if (equal (doclive--query-param path "wiki") "1")
+                                        (doclive--wiki-open id rel)
+                                      (doclive--open-linked-document id rel))))
           (delete-process proc))
       (doclive--send-forbidden proc)))
    ((doclive--route-matches-p path "/events")
@@ -1839,6 +2326,36 @@ the preview."
         (enable-local-eval nil))
     (find-file file))
   (doclive-preview-buffer))
+
+;;;###autoload
+(defun doclive-open-wiki (root)
+  "Open a Markdown and Org Wiki at ROOT without visiting its other pages.
+Recent roots are offered as completion candidates.  Only the initial
+README or first sorted document is visited."
+  (interactive
+   (progn
+     (doclive--wiki-load-state)
+     (list (completing-read "Wiki directory: "
+                            (alist-get 'roots doclive--wiki-state)
+                            nil nil nil nil default-directory))))
+  (setq root (file-name-as-directory (file-truename root)))
+  (unless (file-directory-p root) (user-error "Not a directory: %s" root))
+  (let* ((files (doclive--wiki-files root))
+         (initial (or (seq-find
+                       (lambda (file)
+                         (and (equal (file-name-directory file) root)
+                              (equal (downcase (file-name-base file)) "readme")))
+                       files)
+                      (car files))))
+    (unless initial (user-error "No readable Markdown or Org pages in this Wiki"))
+    (doclive--wiki-load-state)
+    (setf (alist-get 'roots doclive--wiki-state)
+          (seq-take (cons root (delete root (alist-get 'roots doclive--wiki-state))) 12))
+    (let ((enable-local-variables nil) (enable-local-eval nil))
+      (with-current-buffer (find-file-noselect initial)
+        (setq-local doclive--wiki-root root)
+        (doclive--wiki-remember-page root initial)
+        (doclive-preview-buffer)))))
 
 ;;;###autoload
 (defun doclive-reload-page ()

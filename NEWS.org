@@ -1,5 +1,34 @@
 #+TITLE: doclive NEWS - user-visible changes
 
+* 1.4.0 (2026-09-14)
+
+  - Open a documentation folder with ~M-x doclive-open-wiki~. The Library
+    sidebar browses its Markdown and Org pages without visiting every file
+    in Emacs. Recent Wiki roots are available through completion.
+  - Search all Wiki pages by title, path, or body. Space-separated title
+    and path fragments match in any order; body search matches the complete
+    query literally. Title and path matches precede body-only matches,
+    with at most 100 results. Narrow the query to find additional pages.
+  - Bookmark pages with Save page and reopen them from Saved. Recent lists
+    previously visited pages.
+    ~doclive-wiki-state-file~ persists Wiki roots, history, bookmarks,
+    theme, zoom, and search pins across Emacs sessions. Search pins are
+    shared across Wikis. The default file is ~doclive-wiki.json~ in the
+    Emacs user directory. Set the option to ~nil~ for session-only state.
+    The file contains local paths; keep it out of document repositories.
+  - Wiki navigation stays inside the chosen root after resolving symlinks,
+    including when parent-directory navigation is enabled. Directory
+    symlinks, ~.git~, ~.svn~, ~node_modules~, and ~.cache~ are not indexed.
+  - Search xwidget previews from the Emacs minibuffer with ~C-s~ or ~C-r~;
+    ~s-k~ searches the Wiki. Text entry, arrows, Tab, and Return are forwarded to
+    focused page inputs while ~C-x~ and ~M-x~ remain Emacs commands.
+  - Copy now includes text selected inside page inputs.
+    Code-block Copy buttons also update the kill ring. Yank pastes into
+    the focused text input, or searches the current page when none is focused.
+  - macOS keyboard shortcuts, direct typing, and IME composition have not
+    been verified with physical keyboard input; browser tests do not
+    establish those behaviors.
+
 * 1.3.0 (2026-09-11)
 
   - The in-Emacs xwidget preview now opens in another window via
